@@ -1,11 +1,31 @@
 import sys
+import platform
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+
+
+if platform.system() == "Darwin":
+    class SafeQtInteractor(QtInteractor):
+        """Works around the macOS + PySide6 6.10 infinite paintEvent/Render
+        loop (VTK issue #19915) by deferring renders via QTimer."""
+
+        _render_deferred = False
+
+        def paintEvent(self, ev):
+            if not self._render_deferred:
+                self._render_deferred = True
+                QTimer.singleShot(0, self._deferred_render)
+
+        def _deferred_render(self):
+            self._Iren.Render()
+            self._render_deferred = False
+else:
+    SafeQtInteractor = QtInteractor
 
 
 class MaterialSimulationApp(QMainWindow):
@@ -24,7 +44,7 @@ class MaterialSimulationApp(QMainWindow):
 
         # --- 1. Zone 3D (Gauche) ---
         # On utilise QtInteractor de pyvistaqt pour intégrer la 3D dans Qt
-        scene.plotter = QtInteractor(scene.central_widget)
+        scene.plotter = SafeQtInteractor(scene.central_widget)
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
@@ -230,4 +250,6 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MaterialSimulationApp()
     window.show()
+    window.raise_()
+    window.activateWindow()
     sys.exit(app.exec())
