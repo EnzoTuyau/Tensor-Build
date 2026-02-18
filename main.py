@@ -38,15 +38,20 @@ class MaterialSimulationApp(QMainWindow):
         scene.resize(1200, 800)
 
         # Widget central
+        # espace à droite réservé pour les boutons
         scene.central_widget = QWidget()
+        # centre les boutons et les rends le coeur de l'interface
         scene.setCentralWidget(scene.central_widget)
         scene.layout = QHBoxLayout(scene.central_widget)
 
         # --- 1. Zone 3D (Gauche) ---
         # On utilise QtInteractor de pyvistaqt pour intégrer la 3D dans Qt
         scene.plotter = SafeQtInteractor(scene.central_widget)
+        # plotter permet de montrer tout ce que l'utilisateur voit
+        scene.plotter = QtInteractor(scene.central_widget)
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
+        # stretch=2 permet de gérer la proportion de l'interface d'utilisation
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
         # --- 2. Panneau de Contrôle (Droite) ---
@@ -61,14 +66,15 @@ class MaterialSimulationApp(QMainWindow):
         scene.current_actor = None
 
     def setup_ui_controls(scene):
-        """Crée les boutons et menus à droite"""
+        # Crée les boutons et menus à droite
 
-        # --- Section : Ajouter une forme ---
+        # Section : Ajouter une forme
         group_add = QGroupBox("1. Ajouter une Pièce")
         layout_add = QVBoxLayout()
 
         scene.shape_selector = QComboBox()
-        scene.shape_selector.addItems(["Cylindre", "Poutre (Carrée)"])
+        scene.shape_selector.addItems(
+            ["Cylindre", "Poutre (Carrée)", "Prisme Triangulaire", "Sphère", "Cube", "Vis"])
         layout_add.addWidget(QLabel("Forme :"))
         layout_add.addWidget(scene.shape_selector)
 
@@ -129,7 +135,8 @@ class MaterialSimulationApp(QMainWindow):
             "Plastique": (3e9, "lightblue")
         }
         scene.material_selector.addItems(scene.materials_db.keys())
-        scene.material_selector.currentTextChanged.connect(scene.update_material)
+        scene.material_selector.currentTextChanged.connect(
+            scene.update_material)
 
         layout_mat.addWidget(QLabel("Type de matériau :"))
         layout_mat.addWidget(scene.material_selector)
@@ -139,7 +146,8 @@ class MaterialSimulationApp(QMainWindow):
 
         # --- Section : Simulation ---
         scene.btn_sim = QPushButton("Lancer Simulation (Calcul SciPy)")
-        scene.btn_sim.setStyleSheet("background-color: #ffcccc; font-weight: bold; padding: 10px;")
+        scene.btn_sim.setStyleSheet(
+            "background-color: #ffcccc; font-weight: bold; padding: 10px;")
         scene.btn_sim.clicked.connect(scene.run_dummy_simulation)
         scene.control_layout.addWidget(scene.btn_sim)
 
@@ -180,7 +188,8 @@ class MaterialSimulationApp(QMainWindow):
                 resolution=30
             )
         else:  # Poutre Carrée (Box)
-            r = obj_data["params"]["radius"]  # On utilise rayon comme demi-largeur
+            # On utilise rayon comme demi-largeur
+            r = obj_data["params"]["radius"]
             l = obj_data["params"]["length"]
             c = obj_data["params"]["center"]
             # Création d'une boite : bounds=(x_min, x_max, y_min, y_max, z_min, z_max)
@@ -214,7 +223,8 @@ class MaterialSimulationApp(QMainWindow):
 
         current_obj["params"]["radius"] = scene.spin_radius.value()
         current_obj["params"]["length"] = scene.spin_length.value()
-        current_obj["params"]["center"] = (scene.spin_x.value(), scene.spin_y.value(), scene.spin_z.value())
+        current_obj["params"]["center"] = (
+            scene.spin_x.value(), scene.spin_y.value(), scene.spin_z.value())
 
         scene.draw_shape(current_obj)
 
@@ -242,10 +252,12 @@ class MaterialSimulationApp(QMainWindow):
         stress_values = np.linspace(0, 100, mesh.n_points)
 
         scene.plotter.remove_actor(last_obj["actor"])
-        scene.plotter.add_mesh(mesh, scalars=stress_values, cmap="jet", show_edges=False)
+        scene.plotter.add_mesh(mesh, scalars=stress_values,
+                               cmap="jet", show_edges=False)
         scene.plotter.add_scalar_bar(title="Contrainte de Von Mises (MPa)")
 
 
+# permet d'utiliser les fonctions du main sans ouvrir la fenêtre (l'interface)
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MaterialSimulationApp()
