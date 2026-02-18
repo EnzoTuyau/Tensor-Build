@@ -18,15 +18,19 @@ class MaterialSimulationApp(QMainWindow):
         scene.resize(1200, 800)
 
         # Widget central
+        # espace à droite réservé pour les boutons
         scene.central_widget = QWidget()
+        # centre les boutons et les rends le coeur de l'interface
         scene.setCentralWidget(scene.central_widget)
         scene.layout = QHBoxLayout(scene.central_widget)
 
         # --- 1. Zone 3D (Gauche) ---
         # On utilise QtInteractor de pyvistaqt pour intégrer la 3D dans Qt
+        # plotter permet de montrer tout ce que l'utilisateur voit
         scene.plotter = QtInteractor(scene.central_widget)
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
+        #stretch=2 permet de gérer la proportion de l'interface d'utilisation
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
         # --- 2. Panneau de Contrôle (Droite) ---
@@ -41,14 +45,14 @@ class MaterialSimulationApp(QMainWindow):
         scene.current_actor = None
 
     def setup_ui_controls(scene):
-        """Crée les boutons et menus à droite"""
+        # Crée les boutons et menus à droite
 
-        # --- Section : Ajouter une forme ---
+        # Section : Ajouter une forme
         group_add = QGroupBox("1. Ajouter une Pièce")
         layout_add = QVBoxLayout()
 
         scene.shape_selector = QComboBox()
-        scene.shape_selector.addItems(["Cylindre", "Poutre (Carrée)"])
+        scene.shape_selector.addItems(["Cylindre", "Poutre (Carrée)", "Prisme Triangulaire", "Sphère", "Cube", "Vis"])
         layout_add.addWidget(QLabel("Forme :"))
         layout_add.addWidget(scene.shape_selector)
 
@@ -225,7 +229,7 @@ class MaterialSimulationApp(QMainWindow):
         scene.plotter.add_mesh(mesh, scalars=stress_values, cmap="jet", show_edges=False)
         scene.plotter.add_scalar_bar(title="Contrainte de Von Mises (MPa)")
 
-
+# permet d'utiliser les fonctions du main sans ouvrir la fenêtre (l'interface)
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MaterialSimulationApp()
