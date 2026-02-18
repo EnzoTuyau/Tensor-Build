@@ -69,7 +69,7 @@ class MaterialSimulationApp(QMainWindow):
 
         # Rayon / Largeur
         scene.spin_radius = QDoubleSpinBox()
-        scene.spin_radius.setRange(0.1, 100.0)
+        scene.spin_radius.setRange(0.1, 1000.0)
         scene.spin_radius.setValue(1.0)
         scene.spin_radius.setSingleStep(0.1)
         scene.spin_radius.valueChanged.connect(scene.update_current_shape)
@@ -77,20 +77,20 @@ class MaterialSimulationApp(QMainWindow):
 
         # Longueur
         scene.spin_length = QDoubleSpinBox()
-        scene.spin_length.setRange(0.1, 100.0)
+        scene.spin_length.setRange(0.1, 1000.0)
         scene.spin_length.setValue(5.0)
         scene.spin_length.valueChanged.connect(scene.update_current_shape)
         layout_geo.addRow("Longueur :", scene.spin_length)
 
         # Position X, Y, Z (Pour l'assemblage)
         scene.spin_x = QDoubleSpinBox()
-        scene.spin_x.setRange(-100, 100)
+        scene.spin_x.setRange(-1000, 1000)
         scene.spin_x.valueChanged.connect(scene.update_current_shape)
         scene.spin_y = QDoubleSpinBox()
-        scene.spin_y.setRange(-100, 100)
+        scene.spin_y.setRange(-1000, 1000)
         scene.spin_y.valueChanged.connect(scene.update_current_shape)
         scene.spin_z = QDoubleSpinBox()
-        scene.spin_z.setRange(-100, 100)
+        scene.spin_z.setRange(-1000, 1000)
         scene.spin_z.valueChanged.connect(scene.update_current_shape)
 
         layout_geo.addRow("Position X :", scene.spin_x)
