@@ -48,7 +48,6 @@ class MaterialSimulationApp(QMainWindow):
         # On utilise QtInteractor de pyvistaqt pour intégrer la 3D dans Qt
         scene.plotter = SafeQtInteractor(scene.central_widget)
         # plotter permet de montrer tout ce que l'utilisateur voit
-        scene.plotter = QtInteractor(scene.central_widget)
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
         # stretch=2 permet de gérer la proportion de l'interface d'utilisation
