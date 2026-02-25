@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QTimer
 
 if platform.system() == "Darwin":
     class SafeQtInteractor(QtInteractor):
-        """Works around the macOS + PySide6 6.10 infinite paintEvent/Render
+        """Works around the macOS + PySide6 6.10 infinite  paintEvent/Render
         loop (VTK issue #19915) by deferring renders via QTimer."""
 
         _render_deferred = False
