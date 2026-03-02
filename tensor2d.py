@@ -393,6 +393,65 @@ class MaterialSimulationApp(QMainWindow):
         self.panel.refresh_forces()
 
 
+# =============================================================================
+# Fonctions principales VTK pour le rendu 2D (PySide6)
+# =============================================================================
+
+def creer_renderer_2d(couleur_fond=(1, 1, 1)):
+    """
+    Crée un renderer VTK configuré pour la vue 2D (projection orthographique).
+    Retourne le renderer.
+    """
+    from vtkmodules.vtkRenderingCore import vtkRenderer
+    renderer = vtkRenderer()
+    renderer.SetBackground(*couleur_fond)
+    renderer.SetLayer(0)
+    return renderer
+
+
+def configurer_vue_2d(renderer, xmin=-5, xmax=10, ymin=-5, ymax=10):
+    """
+    Configure la caméra en projection parallèle pour une vue 2D.
+    Les limites définissent la zone visible.
+    """
+    from vtkmodules.vtkRenderingCore import vtkCamera
+    camera = renderer.GetActiveCamera()
+    camera.SetParallelProjection(1)
+    camera.SetPosition((xmin + xmax) / 2, (ymin + ymax) / 2, 1)
+    camera.SetFocalPoint((xmin + xmax) / 2, (ymin + ymax) / 2, 0)
+    camera.SetViewUp(0, 1, 0)
+    camera.SetParallelScale((ymax - ymin) / 2)
+
+
+def creer_widget_vtk(parent=None):
+    """
+    Crée un widget Qt intégrant la fenêtre de rendu VTK.
+    Retourne (widget, render_window, interactor).
+    """
+    from vtkmodules.vtkRenderingCore import vtkRenderWindow
+    from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+
+    widget = QVTKRenderWindowInteractor(parent)
+    render_window = widget.GetRenderWindow()
+    interactor = widget.GetRenderWindow().GetInteractor()
+    return widget, render_window, interactor
+
+
+def ajouter_renderer(render_window, renderer):
+    """Ajoute un renderer à la fenêtre de rendu."""
+    render_window.AddRenderer(renderer)
+
+
+def rafraichir_rendu(render_window):
+    """Force le rafraîchissement de l'affichage."""
+    render_window.Render()
+
+
+def initialiser_interacteur(interactor):
+    """Initialise l'interacteur (zoom, pan, etc.). Doit être appelé après show()."""
+    interactor.Initialize()
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MaterialSimulationApp()

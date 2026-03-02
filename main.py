@@ -2,17 +2,44 @@ import sys
 import platform
 import numpy as np
 import pyvista as pv
-from pyvistaqt import QtInteractor
+from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
 from PySide6.QtCore import Qt, QTimer
 
 
+class VtkQtPlotter(QVTKRenderWindowInteractor):
+    """
+    Widget Qt intégrant PyVista via VTK (sans pyvistaqt).
+    Délègue les opérations de rendu au Plotter PyVista.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._plotter = pv.Plotter(window=self.GetRenderWindow())
+        self.interactor = self  # compatibilité avec le code existant
+
+    def set_background(self, *args, **kwargs):
+        return self._plotter.set_background(*args, **kwargs)
+
+    def add_axes(self, *args, **kwargs):
+        return self._plotter.add_axes(*args, **kwargs)
+
+    def add_mesh(self, *args, **kwargs):
+        return self._plotter.add_mesh(*args, **kwargs)
+
+    def remove_actor(self, *args, **kwargs):
+        return self._plotter.remove_actor(*args, **kwargs)
+
+    def add_scalar_bar(self, *args, **kwargs):
+        return self._plotter.add_scalar_bar(*args, **kwargs)
+
+
 if platform.system() == "Darwin":
-    class SafeQtInteractor(QtInteractor):
-        """Works around the macOS + PySide6 6.10 infinite paintEvent/Render
-        loop (VTK issue #19915) by deferring renders via QTimer."""
+    class SafeVtkQtPlotter(VtkQtPlotter):
+        """Contourne la boucle infinie paintEvent/Render sur macOS + PySide6 6.10
+        (VTK issue #19915) en différant le rendu via QTimer."""
 
         _render_deferred = False
 
@@ -22,10 +49,10 @@ if platform.system() == "Darwin":
                 QTimer.singleShot(0, self._deferred_render)
 
         def _deferred_render(self):
-            self._Iren.Render()
+            self.GetRenderWindow().Render()
             self._render_deferred = False
 else:
-    SafeQtInteractor = QtInteractor
+    SafeVtkQtPlotter = VtkQtPlotter
 
 
 class MaterialSimulationApp(QMainWindow):
@@ -45,8 +72,8 @@ class MaterialSimulationApp(QMainWindow):
         scene.layout = QHBoxLayout(scene.central_widget)
 
         # --- 1. Zone 3D (Gauche) ---
-        # On utilise QtInteractor de pyvistaqt pour intégrer la 3D dans Qt
-        scene.plotter = SafeQtInteractor(scene.central_widget)
+        # Intégration VTK + PyVista via QVTKRenderWindowInteractor (sans pyvistaqt)
+        scene.plotter = SafeVtkQtPlotter(scene.central_widget)
         # plotter permet de montrer tout ce que l'utilisateur voit
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
@@ -263,4 +290,6 @@ if __name__ == "__main__":
     window.show()
     window.raise_()
     window.activateWindow()
+    # Initialisation requise pour l'interacteur VTK
+    window.plotter.GetRenderWindow().GetInteractor().Initialize()
     sys.exit(app.exec())
