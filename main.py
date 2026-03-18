@@ -2,38 +2,23 @@ import sys
 import platform
 import numpy as np
 import pyvista as pv
-from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
 from PySide6.QtCore import Qt, QTimer
 
 
-class VtkQtPlotter(QVTKRenderWindowInteractor):
+class VtkQtPlotter(QtInteractor):
     """
-    Widget Qt intégrant PyVista via VTK (sans pyvistaqt).
-    Délègue les opérations de rendu au Plotter PyVista.
+    Widget Qt intégrant PyVista via pyvistaqt.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._plotter = pv.Plotter(window=self.GetRenderWindow())
-        self.interactor = self  # compatibilité avec le code existant
-
-    def set_background(self, *args, **kwargs):
-        return self._plotter.set_background(*args, **kwargs)
-
-    def add_axes(self, *args, **kwargs):
-        return self._plotter.add_axes(*args, **kwargs)
-
-    def add_mesh(self, *args, **kwargs):
-        return self._plotter.add_mesh(*args, **kwargs)
-
-    def remove_actor(self, *args, **kwargs):
-        return self._plotter.remove_actor(*args, **kwargs)
-
-    def add_scalar_bar(self, *args, **kwargs):
-        return self._plotter.add_scalar_bar(*args, **kwargs)
+        # Compatibilité avec le code existant qui ajoute `plotter.interactor` au layout.
+        if not hasattr(self, "interactor"):
+            self.interactor = self
 
 
 if platform.system() == "Darwin":
