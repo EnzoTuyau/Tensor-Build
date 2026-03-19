@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import QApplication
-from MaterielSimulationApp import MaterielSimulationApp
+from MaterielSimulation import MaterielSimulationApp
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

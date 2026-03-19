@@ -1,13 +1,11 @@
 import sys
-import platform
 import numpy as np
-import pyvista as pv
-from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
 from SafeQtInteractor import SafeQtInteractor
 from Formes import Cube, Cylindre, PoutreCarree, PrismeTriangulaire, Sphere, Vis
+from Environnement import Sol, Gravite
 
 FORMES_DISPONIBLES = {
     cls.NOM: cls
@@ -29,6 +27,9 @@ class MaterielSimulationApp(QMainWindow):
         scene.plotter = SafeQtInteractor(scene.central_widget)
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
+        scene.sol = Sol(scene.plotter)
+        scene.sol.afficher()
+        scene.gravite = Gravite(g=9.81)
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
         # Panneau de contrôle (droite)
@@ -142,7 +143,26 @@ class MaterielSimulationApp(QMainWindow):
         group_erase.setLayout(layout_erase)
         scene.control_layout.addWidget(group_erase)
 
-        scene.control_layout.addStretch()
+        # --- 5. Vue de la résistance ---
+        group_resistance = QGroupBox("5. Vue de la Résistance")
+        layout_resistance = QVBoxLayout()
+
+        scene.btn_resistance = QPushButton("Afficher les contraintes")
+        scene.btn_resistance.setStyleSheet(
+            "background-color: #cce5ff; font-weight: bold; padding: 8px;")
+        scene.btn_resistance.clicked.connect(scene.afficher_resistance)
+        layout_resistance.addWidget(scene.btn_resistance)
+
+        scene.btn_resistance_reset = QPushButton("Réinitialiser les couleurs")
+        scene.btn_resistance_reset.setStyleSheet(
+            "background-color: #dddddd; font-weight: bold; padding: 8px;")
+        scene.btn_resistance_reset.clicked.connect(scene.reinitialiser_couleurs)
+        layout_resistance.addWidget(scene.btn_resistance_reset)
+
+        group_resistance.setLayout(layout_resistance)
+        scene.control_layout.addWidget(group_resistance)
+
+        scene.control_layout.addStretch()  # toujours en dernier
 
     # ------------------------------------------------------------------ #
     #  Ajouter / Dessiner                                                  #
@@ -206,20 +226,44 @@ class MaterielSimulationApp(QMainWindow):
         if not scene.objects:
             return
 
-        QMessageBox.information(scene, "Simulation",
-                                "Calcul de la matrice de rigidité K en cours...\n"
-                                "Application des forces...\n"
-                                "Résolution F = K * u avec SciPy...")
+        mat_name = scene.selecteur_materiaux.currentText()
+        rapport = scene.gravite.rapport_complet(scene.objects, mat_name)
+        QMessageBox.information(scene, "Simulation", rapport)
 
-        forme = scene.objects[-1]
-        mesh = forme.mesh
+        # Anime la chute de toutes les formes
+        for forme in scene.objects:
+            scene.animer_chute(forme)
 
-        stress_values = np.linspace(0, 100, mesh.n_points)
+    def animer_chute(scene, forme):
+        """Anime la forme qui tombe vers Z=0 (le sol)."""
+        import time
 
-        scene.plotter.remove_actor(forme.actor)
-        scene.plotter.add_mesh(mesh, scalars=stress_values,
-                               cmap="jet", show_edges=False)
-        scene.plotter.add_scalar_bar(title="Contrainte de Von Mises (MPa)")
+        z_actuel = forme.params["centre"][2]
+        z_sol = 0.0  # hauteur du sol
+        nb_frames = 60  # nombre d'étapes de l'animation
+        vitesse = 0.3  # m/s² simulé (purement visuel)
+
+        for i in range(nb_frames):
+            # Calcule la nouvelle position Z avec accélération
+            t = i / nb_frames
+            z_nouv = z_actuel - (z_actuel - z_sol) * (t ** 2)
+
+            # Stop si on touche le sol
+            if z_nouv <= z_sol:
+                z_nouv = z_sol
+
+            # Met à jour la position et redessine
+            forme.params["centre"] = (
+                forme.params["centre"][0],
+                forme.params["centre"][1],
+                z_nouv
+            )
+            scene.dessiner_forme(forme)
+            scene.plotter.render()
+            time.sleep(0.016)  # ~60 fps
+
+            if z_nouv <= z_sol:
+                break
 
     # ------------------------------------------------------------------ #
     #  Mode Effacer                                                        #
@@ -253,6 +297,41 @@ class MaterielSimulationApp(QMainWindow):
                 scene.plotter.remove_actor(forme.actor)
                 scene.objects.remove(forme)
                 break
+
+    def afficher_resistance(scene):
+        """Affiche la carte de contraintes sur toutes les formes."""
+        if not scene.objects:
+            return
+
+        for forme in scene.objects:
+            mesh = forme.mesh
+            stress_values = np.linspace(0, 100, mesh.n_points)
+
+            scene.plotter.remove_actor(forme.actor)
+            forme.actor = scene.plotter.add_mesh(
+                mesh,
+                scalars=stress_values,
+                cmap="jet",
+                show_edges=False
+            )
+
+        scene.plotter.add_scalar_bar(title="Contrainte de Von Mises (MPa)")
+
+    def reinitialiser_couleurs(scene):
+        """Remet les couleurs originales du matériau sur toutes les formes."""
+        if not scene.objects:
+            return
+
+        mat_name = scene.selecteur_materiaux.currentText()
+        color = scene.materials_db[mat_name][1]
+
+        for forme in scene.objects:
+            scene.plotter.remove_actor(forme.actor)
+            forme.actor = scene.plotter.add_mesh(
+                forme.mesh,
+                color=color,
+                show_edges=True
+            )
 
 
 # ================================================================== #
