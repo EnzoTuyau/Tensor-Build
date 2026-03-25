@@ -379,7 +379,18 @@ class Canvas2D(FigureCanvasQTAgg):
                     self._arrow_artists.append(arr)
 
         # ── Contacts ─────────────────────────
-        for (i_bot, i_top, frac) in contact_pairs:
+        # Étiquettes vers la marge la plus proche (gauche/droite) ; alternance si le joint est au centre.
+        xmin_ax, xmax_ax = self.axes.get_xlim()
+        mid_band = 0.22 * (xmax_ax - xmin_ax)
+
+        def _y_interface(pair):
+            i_bot, _, _ = pair
+            xb, yb = self.rects[i_bot]["patch"].get_xy()
+            return yb + self.rects[i_bot]["patch"].get_height()
+
+        sorted_pairs = sorted(contact_pairs, key=_y_interface)
+
+        for k, (i_bot, i_top, frac) in enumerate(sorted_pairs):
             rd_b   = self.rects[i_bot]
             rd_t   = self.rects[i_top]
             xb, yb = rd_b["patch"].get_xy()
@@ -415,10 +426,18 @@ class Canvas2D(FigureCanvasQTAgg):
             self.axes.add_patch(arr_u)
             self._arrow_artists.append(arr_u)
 
+            d_left, d_right = cx - xmin_ax, xmax_ax - cx
+            if abs(d_left - d_right) < mid_band:
+                place_right = (k % 2 == 0)
+            else:
+                place_right = d_right <= d_left
+            dx = 0.34
+            tx, ha = (cx + dx, "left") if place_right else (cx - dx, "right")
+
             lbl = self.axes.text(
-                cx + 0.3, y_if,
+                tx, y_if,
                 f"Fc = {F_c:.0f} N\n({frac*100:.0f}% contact)",
-                ha="left", va="center", fontsize=7,
+                ha=ha, va="center", fontsize=7,
                 color="#bf360c", fontweight="bold", zorder=14,
                 bbox=dict(boxstyle="round,pad=0.25",
                           facecolor="#fff3e0", alpha=0.92, edgecolor="#ff6f00")
@@ -450,10 +469,11 @@ class Canvas2D(FigureCanvasQTAgg):
             dot, = self.axes.plot(xg, yg, "o", color="#f9a825", markersize=13,
                                   zorder=16, markeredgecolor="#e65100", markeredgewidth=2)
 
-            # Étiquette explicite
+            # Étiquette au-dessus à gauche du point (les Fc partent vers les bords horizontaux)
             lbl_cg = self.axes.text(
-                xg + 0.18, yg + 0.18,
+                xg - 0.20, yg + 0.38,
                 f"⊕ Centre de\n   Gravité\n   ({xg:.2f}, {yg:.2f})",
+                ha="right", va="bottom",
                 color="#e65100", fontsize=7.5, fontweight="bold", zorder=17,
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff9c4",
                           alpha=0.92, edgecolor="#f9a825")
