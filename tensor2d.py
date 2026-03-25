@@ -4,8 +4,6 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle, FancyArrowPatch
-import matplotlib.colors as mcolors
-import matplotlib.cm as cm
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QDockWidget, QDoubleSpinBox, QPushButton, QListWidget, QListWidgetItem,
@@ -20,6 +18,26 @@ GROUND_Y = 0.0
 SNAP_TOL = 0.18   # tolérance de contact (m)
 FALL_STEP = 0.12   # pas de chute par tick (m)
 TIMER_MS = 30     # ms entre chaque tick de physique
+
+# Matériaux 2D : densité, module E, limite σ, couleurs du patch (face / contour).
+MATERIALS = {
+    "Acier": {
+        "density": 7850, "E": 210e9, "sigma_y": 250e6,
+        "face": "#b0bec5", "edge": "#37474f",
+    },
+    "Béton": {
+        "density": 2400, "E": 30e9, "sigma_y": 30e6,
+        "face": "#bdbdbd", "edge": "#424242",
+    },
+    "Aluminium": {
+        "density": 2700, "E": 70e9, "sigma_y": 270e6,
+        "face": "#e3f2fd", "edge": "#0277bd",
+    },
+    "Bois": {
+        "density": 600, "E": 12e9, "sigma_y": 40e6,
+        "face": "#a67c52", "edge": "#3e2723",
+    },
+}
 
 
 def _overlaps_x(rd_a, rd_b):
@@ -407,7 +425,11 @@ class Canvas2D(FigureCanvasQTAgg):
                 self._on_rects_changed()
 
     # ── Blocs ────────────────────────────────
-    def add_rectangle(self, w, h, material="Acier", density=7850):
+    def add_rectangle(self, w, h, material="Acier", density=None):
+        mp = MATERIALS.get(material, MATERIALS["Acier"])
+        if density is None:
+            density = mp["density"]
+        fc, ec = mp["face"], mp["edge"]
         # Spawn en haut au centre si gravité active, sinon au-dessus de la pile
         if self.gravity_on:
             y_start = 9.0
@@ -421,7 +443,7 @@ class Canvas2D(FigureCanvasQTAgg):
             x_start = 0.5
         patch = Rectangle(
             (x_start, y_start), w, h,
-            facecolor="#bbdefb", edgecolor="#1565c0",
+            facecolor=fc, edgecolor=ec,
             linewidth=1.8, zorder=5, alpha=0.9
         )
         self.axes.add_patch(patch)
@@ -429,6 +451,7 @@ class Canvas2D(FigureCanvasQTAgg):
             "patch":     patch,
             "material":  material,
             "density":   density,
+            "edgecolor": ec,
             "ext_force": 0.0,
             "moment":    0.0,
             "pressure":  0.0,
@@ -543,13 +566,7 @@ class Canvas2D(FigureCanvasQTAgg):
             self.draw_idle()
             return
 
-        all_sigma = [abs(d["sigma_total"]) for d in stress_data if d]
-        sigma_max_global = max(all_sigma) if any(
-            s > 0 for s in all_sigma) else 1.0
-        cmap = cm.get_cmap("RdYlGn_r")
-        norm = mcolors.Normalize(vmin=0, vmax=sigma_max_global)
-
-        # ── Blocs ────────────────────────────
+        # ── Blocs : teinte matériau fixe (pas de colormap σ sur le dessin)
         for i, (rd, sd) in enumerate(zip(self.rects, stress_data)):
             if sd is None:
                 continue
@@ -557,25 +574,39 @@ class Canvas2D(FigureCanvasQTAgg):
             x, y = patch.get_xy()
             w, h = patch.get_width(), patch.get_height()
 
+            mat = rd["material"]
+            fc = MATERIALS.get(mat, MATERIALS["Acier"])["face"]
             if abs(sd.get("sigma_bending_top", 0)) > 1:
-                for dy, sig in [(0, sd["sigma_bending_bot"]), (h/2, sd["sigma_bending_top"])]:
-                    c = cmap(norm(abs(sig)))
-                    r = Rectangle((x, y + dy), w, h/2,
-                                  facecolor=c, edgecolor="none", alpha=0.55, zorder=6)
+                for dy in (0, h / 2):
+                    r = Rectangle(
+                        (x, y + dy), w, h / 2,
+                        facecolor=fc, edgecolor="none", alpha=0.96, zorder=6)
                     self.axes.add_patch(r)
                     self._stress_patches.append(r)
             else:
-                c = cmap(norm(abs(sd["sigma_total"])))
-                r = Rectangle((x, y), w, h,
-                              facecolor=c, edgecolor="none", alpha=0.55, zorder=6)
+                r = Rectangle(
+                    (x, y), w, h,
+                    facecolor=fc, edgecolor="none", alpha=0.96, zorder=6)
                 self.axes.add_patch(r)
                 self._stress_patches.append(r)
 
+            ec = rd.get("edgecolor") or MATERIALS.get(
+                rd["material"], MATERIALS["Acier"])["edge"]
             border = Rectangle((x, y), w, h,
-                               facecolor="none", edgecolor="#1565c0",
+                               facecolor="none", edgecolor=ec,
                                linewidth=1.5, zorder=7)
             self.axes.add_patch(border)
             self._stress_patches.append(border)
+
+            # Assombrissement au contact avec le sol
+            if abs(y - GROUND_Y) < SNAP_TOL * 2.0:
+                sh = min(0.09, max(0.04, h * 0.22))
+                sol_sh = Rectangle(
+                    (x, y), w, sh,
+                    facecolor="#000000", edgecolor="none", alpha=0.34,
+                    zorder=8)
+                self.axes.add_patch(sol_sh)
+                self._stress_patches.append(sol_sh)
 
             # σ / utilisation : uniquement dans l’onglet « Résultats »
 
@@ -607,8 +638,8 @@ class Canvas2D(FigureCanvasQTAgg):
                     self.axes.add_patch(arr)
                     self._arrow_artists.append(arr)
 
-        # ── Contacts ─────────────────────────
-        # Clic sur la bande orange : infobulle dans le panneau latéral (× pour fermer).
+        # ── Contacts : bande sombre + noircissement local au joint
+        # Clic sur la bande : infobulle (× pour fermer).
 
         def _y_interface(pair):
             i_bot, _, _ = pair
@@ -623,14 +654,37 @@ class Canvas2D(FigureCanvasQTAgg):
             xb, yb = rd_b["patch"].get_xy()
             wb, hb = rd_b["patch"].get_width(), rd_b["patch"].get_height()
             xt, yt = rd_t["patch"].get_xy()
-            wt = rd_t["patch"].get_width()
+            wt, ht = rd_t["patch"].get_width(), rd_t["patch"].get_height()
             y_if = yb + hb
 
             x_l = max(xb, xt)
             x_r = min(xb + wb, xt + wt)
+            if x_r <= x_l:
+                continue
+
+            shade_d = min(0.08, hb * 0.38, ht * 0.38)
+            y_bot0 = max(yb, y_if - shade_d)
+            h_bot = y_if - y_bot0
+            if h_bot > 1e-4:
+                sb = Rectangle(
+                    (x_l, y_bot0), x_r - x_l, h_bot,
+                    facecolor="#000000", edgecolor="none", alpha=0.36,
+                    zorder=9)
+                self.axes.add_patch(sb)
+                self._stress_patches.append(sb)
+            y_top1 = min(yt + ht, y_if + shade_d)
+            h_top = y_top1 - y_if
+            if h_top > 1e-4:
+                st = Rectangle(
+                    (x_l, y_if), x_r - x_l, h_top,
+                    facecolor="#000000", edgecolor="none", alpha=0.36,
+                    zorder=9)
+                self.axes.add_patch(st)
+                self._stress_patches.append(st)
+
             cr = Rectangle(
                 (x_l, y_if - 0.05), x_r - x_l, 0.10,
-                facecolor="#ff6f00", edgecolor="none", alpha=0.9, zorder=12
+                facecolor="#1a1a1a", edgecolor="none", alpha=0.88, zorder=12
             )
             self.axes.add_patch(cr)
             self._stress_patches.append(cr)
@@ -670,16 +724,6 @@ class Canvas2D(FigureCanvasQTAgg):
             )
             self.axes.add_patch(arr_u)
             self._arrow_artists.append(arr_u)
-
-            for rd_hl in (rd_b, rd_t):
-                px, py = rd_hl["patch"].get_xy()
-                pw, ph = rd_hl["patch"].get_width(
-                ), rd_hl["patch"].get_height()
-                hl = Rectangle((px, py), pw, ph,
-                               facecolor="none", edgecolor="#ff6f00",
-                               linewidth=1, linestyle="--", zorder=8)
-                self.axes.add_patch(hl)
-                self._stress_patches.append(hl)
 
         # ── Centre de gravité (boule jaune) ──
         total_area = sum(rd["patch"].get_width() *
@@ -732,13 +776,7 @@ def _block_list_row(panel, index: int, text: str) -> QWidget:
 #  Panneau de contrôle
 # ─────────────────────────────────────────────
 class ControlPanel(QFrame):
-    MATERIALS = {
-        "Acier":     {"density": 7850, "E": 210e9, "sigma_y": 250e6},
-        "Béton":     {"density": 2400, "E":  30e9, "sigma_y":  30e6},
-        "Aluminium": {"density": 2700, "E":  70e9, "sigma_y": 270e6},
-        "Bois":      {"density":  600, "E":  12e9, "sigma_y":  40e6},
-        "Fonte":     {"density": 7200, "E": 170e9, "sigma_y": 200e6},
-    }
+    MATERIALS = MATERIALS
 
     def __init__(self, canvas, physics_callback, parent=None):
         super().__init__(parent)
@@ -756,17 +794,10 @@ class ControlPanel(QFrame):
         # ── Gravité toggle ───────────────────
         grp_grav = QGroupBox("Simulation physique")
         lay_grav = QVBoxLayout(grp_grav)
-        self.chk_gravity = QCheckBox("🌍  Activer la gravité")
+        self.chk_gravity = QCheckBox("Gravité")
         self.chk_gravity.setStyleSheet("font-weight:bold; font-size:11px;")
         self.chk_gravity.toggled.connect(self._on_gravity_toggle)
         lay_grav.addWidget(self.chk_gravity)
-        lbl_info = QLabel(
-            "Quand activée : les nouveaux blocs\n"
-            "tombent et s'empilent sur les autres.\n"
-            "Les blocs ne peuvent pas se traverser."
-        )
-        lbl_info.setStyleSheet("color:#555; font-size:8px;")
-        lay_grav.addWidget(lbl_info)
         grp_grav.setLayout(lay_grav)
         layout.addWidget(grp_grav)
 
@@ -915,9 +946,8 @@ class ControlPanel(QFrame):
 
     def _on_add(self):
         mn = self.combo_mat.currentText()
-        mat = self.MATERIALS[mn]
-        self.canvas.add_rectangle(self.spin_w.value(), self.spin_h.value(),
-                                  material=mn, density=mat["density"])
+        self.canvas.add_rectangle(
+            self.spin_w.value(), self.spin_h.value(), material=mn)
 
     def _on_remove_at(self, idx):
         if 0 <= idx < len(self.canvas.rects):
