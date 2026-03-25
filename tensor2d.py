@@ -450,10 +450,11 @@ class Canvas2D(FigureCanvasQTAgg):
             dot, = self.axes.plot(xg, yg, "o", color="#f9a825", markersize=13,
                                   zorder=16, markeredgecolor="#e65100", markeredgewidth=2)
 
-            # Étiquette explicite
+            # Étiquette au nord-ouest du point (les Fc sont à droite de l'interface → évite chevauchement)
             lbl_cg = self.axes.text(
-                xg + 0.18, yg + 0.18,
+                xg - 0.20, yg + 0.38,
                 f"⊕ Centre de\n   Gravité\n   ({xg:.2f}, {yg:.2f})",
+                ha="right", va="bottom",
                 color="#e65100", fontsize=7.5, fontweight="bold", zorder=17,
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff9c4",
                           alpha=0.92, edgecolor="#f9a825")
