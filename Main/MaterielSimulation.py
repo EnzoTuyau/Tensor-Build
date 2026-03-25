@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from SafeQtInteractor import SafeQtInteractor
 from Formes import Cube, Cylindre, PoutreCarree, PrismeTriangulaire, Sphere, Vis
 from Environnement import Sol, Gravite
+from Camera import Camera
 
 FORMES_DISPONIBLES = {
     cls.NOM: cls
@@ -29,6 +30,9 @@ class MaterielSimulationApp(QMainWindow):
         scene.plotter.add_axes()
         scene.sol = Sol(scene.plotter)
         scene.sol.afficher()
+        scene.sol.afficher()
+        scene.camera = Camera(scene.plotter)
+        scene.camera.initialiser()
         scene.gravite = Gravite(g=9.81)
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
@@ -48,11 +52,14 @@ class MaterielSimulationApp(QMainWindow):
 
     def setup_ui_controls(scene):
 
+
         # --- 1. Ajouter une forme ---
         group_add = QGroupBox("1. Ajouter une Pièce")
         layout_add = QVBoxLayout()
 
+        scene.forme_selectionnee = None
         scene.shape_selector = QComboBox()
+        scene.shape_selector.addItem("Choisir une forme")
         scene.shape_selector.addItems(FORMES_DISPONIBLES.keys())
         layout_add.addWidget(QLabel("Forme :"))
         layout_add.addWidget(scene.shape_selector)
@@ -162,17 +169,41 @@ class MaterielSimulationApp(QMainWindow):
         group_resistance.setLayout(layout_resistance)
         scene.control_layout.addWidget(group_resistance)
 
+        # --- 6. Inspecter une forme ---
+        group_inspect = QGroupBox("6. Inspecter une Pièce")
+        layout_inspect = QVBoxLayout()
+
+        scene.btn_inspect = QPushButton("Mode Inspecter : OFF")
+        scene.btn_inspect.setCheckable(True)
+        scene.btn_inspect.setStyleSheet(
+            "background-color: #dddddd; font-weight: bold; padding: 8px;")
+        scene.btn_inspect.toggled.connect(scene.toggle_inspect_mode)
+        layout_inspect.addWidget(scene.btn_inspect)
+
+        group_inspect.setLayout(layout_inspect)
+        scene.control_layout.addWidget(group_inspect)
+
+
+
+        group_geo.setEnabled(False)  # ← grisé au départ
+        scene.group_geo = group_geo  # ← garde une référence
+
+        scene.shape_selector.currentIndexChanged.connect(scene.on_forme_choisie)
+
         scene.control_layout.addStretch()  # toujours en dernier
+
+
 
     # ------------------------------------------------------------------ #
     #  Ajouter / Dessiner                                                  #
     # ------------------------------------------------------------------ #
 
     def add_shape(scene):
-        """Instancie la bonne classe de forme et l'ajoute à la scène."""
         nom = scene.shape_selector.currentText()
-        classe = FORMES_DISPONIBLES[nom]
+        if nom not in FORMES_DISPONIBLES:
+            return
 
+        classe = FORMES_DISPONIBLES[nom]
         params = {
             "rayon": scene.spin_radius.value(),
             "longueur": scene.spin_length.value(),
@@ -184,28 +215,45 @@ class MaterielSimulationApp(QMainWindow):
         forme = classe(params)
         scene.objects.append(forme)
         scene.dessiner_forme(forme)
+        scene.forme_selectionnee = forme  # ← pointe sur la nouvelle forme
+
+        # Remet le sélecteur à 0 SANS déclencher on_forme_choisie
+        scene.shape_selector.blockSignals(True)
+        scene.shape_selector.setCurrentIndex(0)
+        scene.shape_selector.blockSignals(False)
+
+        # Garde le groupe dimensions actif et la forme surlignée
+        scene.group_geo.setEnabled(True)
+        scene.plotter.remove_actor(forme.actor)
+        forme.actor = scene.plotter.add_mesh(forme.mesh, color="yellow", show_edges=True, reset_camera=False)
 
     def dessiner_forme(scene, forme):
-        """Construit le mesh via la classe et l'affiche dans le plotter."""
+        scene.camera.sauvegarder()  # ← sauvegarde avant
+
         if forme.actor:
             scene.plotter.remove_actor(forme.actor)
 
         forme.mesh = forme.construire_mesh()
-
         mat_name = scene.selecteur_materiaux.currentText()
         color = scene.materials_db[mat_name][1]
 
-        forme.actor = scene.plotter.add_mesh(forme.mesh, color=color, show_edges=True)
+        forme.actor = scene.plotter.add_mesh(
+            forme.mesh,
+            color=color,
+            show_edges=True,
+            reset_camera=False
+        )
+
+        scene.camera.restaurer()  # ← restaure après
 
     # ------------------------------------------------------------------ #
     #  Mise à jour                                                         #
     # ------------------------------------------------------------------ #
 
     def update_current_shape(scene):
-        """Met à jour le dernier objet quand on change les spinbox."""
-        if not scene.objects:
+        forme = scene.forme_selectionnee
+        if forme is None:
             return
-        forme = scene.objects[-1]
         forme.params["rayon"] = scene.spin_radius.value()
         forme.params["longueur"] = scene.spin_length.value()
         forme.params["centre"] = (scene.spin_x.value(),
@@ -213,10 +261,30 @@ class MaterielSimulationApp(QMainWindow):
                                   scene.spin_z.value())
         scene.dessiner_forme(forme)
 
+        # Garde le surlignage jaune
+        scene.plotter.remove_actor(forme.actor)
+        forme.actor = scene.plotter.add_mesh(
+            forme.mesh,
+            color="yellow",
+            show_edges=True,
+            reset_camera=False  # ← manquait ici
+        )
+
     def update_materiel(scene):
-        """Recolore le dernier objet selon le matériau choisi."""
-        if scene.objects:
-            scene.dessiner_forme(scene.objects[-1])
+        """Recolore uniquement la forme sélectionnée."""
+        if scene.forme_selectionnee is None:
+            return  # aucune forme active, on ne touche à rien
+
+        mat_name = scene.selecteur_materiaux.currentText()
+        color = scene.materials_db[mat_name][1]
+        scene.plotter.remove_actor(scene.forme_selectionnee.actor)
+        scene.forme_selectionnee.actor = scene.plotter.add_mesh(
+            scene.forme_selectionnee.mesh, color=color, show_edges=True)
+
+        # Remet le surlignage jaune si c'est la forme en cours d'édition
+        scene.plotter.remove_actor(scene.forme_selectionnee.actor)
+        scene.forme_selectionnee.actor = scene.plotter.add_mesh(
+            scene.forme_selectionnee.mesh, color="yellow", show_edges=True)
 
     # ------------------------------------------------------------------ #
     #  Simulation                                                          #
@@ -235,24 +303,26 @@ class MaterielSimulationApp(QMainWindow):
             scene.animer_chute(forme)
 
     def animer_chute(scene, forme):
-        """Anime la forme qui tombe vers Z=0 (le sol)."""
         import time
 
+        mat_name = scene.selecteur_materiaux.currentText()
+        masse = scene.gravite.calculer_masse(forme, mat_name)  # kg
+        g = scene.gravite.g  # utilise le g de l'objet Gravite
+
         z_actuel = forme.params["centre"][2]
-        z_sol = 0.0  # hauteur du sol
-        nb_frames = 60  # nombre d'étapes de l'animation
-        vitesse = 0.3  # m/s² simulé (purement visuel)
+        z_sol = -10.0 + forme.r
+        nb_frames = 100
+        dt = 0.05
+        vitesse_z = 0.0
 
         for i in range(nb_frames):
-            # Calcule la nouvelle position Z avec accélération
-            t = i / nb_frames
-            z_nouv = z_actuel - (z_actuel - z_sol) * (t ** 2)
+            vitesse_z += g * dt
+            z_nouv = z_actuel - vitesse_z * dt
+            z_actuel = z_nouv
 
-            # Stop si on touche le sol
             if z_nouv <= z_sol:
                 z_nouv = z_sol
 
-            # Met à jour la position et redessine
             forme.params["centre"] = (
                 forme.params["centre"][0],
                 forme.params["centre"][1],
@@ -260,10 +330,18 @@ class MaterielSimulationApp(QMainWindow):
             )
             scene.dessiner_forme(forme)
             scene.plotter.render()
-            time.sleep(0.016)  # ~60 fps
+            time.sleep(0.000001)
 
             if z_nouv <= z_sol:
                 break
+
+        # afficher l'énergie d'impact
+        energie = 0.5 * masse * vitesse_z ** 2  # E = ½mv²
+        QMessageBox.information(
+            scene,
+            "Impact",
+            f"{forme.NOM}\nMasse : {masse:.2f} kg\nÉnergie d'impact : {energie:.2f} J"
+        )
 
     # ------------------------------------------------------------------ #
     #  Mode Effacer                                                        #
@@ -332,6 +410,81 @@ class MaterielSimulationApp(QMainWindow):
                 color=color,
                 show_edges=True
             )
+
+    # ------------------------------------------------------------------ #
+    #  Mode données sur la forme                                         #
+    # ------------------------------------------------------------------ #
+
+    def toggle_inspect_mode(scene, active):
+        if active:
+            scene.btn_inspect.setText("Mode Inspecter : ON")
+            scene.btn_inspect.setStyleSheet(
+                "background-color: #66bb66; color: white; font-weight: bold; padding: 8px;")
+            scene.plotter.enable_mesh_picking(
+                callback=scene.on_inspect,
+                use_mesh=True,
+                show=False,
+                left_clicking=True,
+                show_message=False,
+            )
+        else:
+            scene.btn_inspect.setText("Mode Inspecter : OFF")
+            scene.btn_inspect.setStyleSheet(
+                "background-color: #dddddd; font-weight: bold; padding: 8px;")
+            scene.plotter.disable_picking()
+
+
+    def on_inspect(scene, picked_mesh):
+        if picked_mesh is None:
+            return
+        for forme in scene.objects:
+            if forme.mesh is picked_mesh:
+                scene.forme_selectionnee = forme
+
+                # Surligne en jaune la forme sélectionnée
+                for f in scene.objects:
+                    mat_name = scene.selecteur_materiaux.currentText()
+                    color = scene.materials_db[mat_name][1]
+                    scene.plotter.remove_actor(f.actor)
+                    f.actor = scene.plotter.add_mesh(f.mesh, color=color, show_edges=True)
+
+                scene.plotter.remove_actor(forme.actor)
+                forme.actor = scene.plotter.add_mesh(
+                    forme.mesh, color="yellow", show_edges=True)
+
+                # Bloque les signaux
+                for spin in [scene.spin_radius, scene.spin_length,
+                             scene.spin_x, scene.spin_y, scene.spin_z]:
+                    spin.blockSignals(True)
+
+                scene.spin_radius.setValue(forme.r)
+                scene.spin_length.setValue(forme.l)
+                scene.spin_x.setValue(forme.c[0])
+                scene.spin_y.setValue(forme.c[1])
+                scene.spin_z.setValue(forme.c[2])
+
+                for spin in [scene.spin_radius, scene.spin_length,
+                             scene.spin_x, scene.spin_y, scene.spin_z]:
+                    spin.blockSignals(False)
+                break
+
+    def on_forme_choisie(scene, index):
+        if index == 0:
+            scene.group_geo.setEnabled(False)
+            scene.forme_selectionnee = None
+        else:
+            # Remet la couleur normale sur l'ancienne forme sélectionnée
+            if scene.forme_selectionnee is not None:
+                mat_name = scene.selecteur_materiaux.currentText()
+                color = scene.materials_db[mat_name][1]
+                scene.plotter.remove_actor(scene.forme_selectionnee.actor)
+                scene.forme_selectionnee.actor = scene.plotter.add_mesh(
+                    scene.forme_selectionnee.mesh, color=color, show_edges=True)
+                scene.forme_selectionnee = None
+
+            scene.group_geo.setEnabled(True)
+
+
 
 
 # ================================================================== #

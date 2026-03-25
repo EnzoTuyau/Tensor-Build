@@ -1,5 +1,5 @@
 class Forme:
-    """Classe de base — toutes les formes héritent d'ici."""
+    """Classe de base — toutes les formes héritent."""
 
     def __init__(self, params):
         self.params = params  # dict : rayon, longueur, centre

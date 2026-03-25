@@ -4,7 +4,7 @@ import pyvista as pv
 class Sol:
     """Représente le sol de la scène 3D."""
 
-    def __init__(self, plotter, hauteur=0.0, taille=50, couleur="lightgreen", opacite=0.5):
+    def __init__(self, plotter, hauteur=-10.0, taille=50, couleur="lightgreen", opacite=0.5):
         """
         plotter  : le SafeQtInteractor de la scène
         hauteur  : position Z du sol (défaut = 0)
