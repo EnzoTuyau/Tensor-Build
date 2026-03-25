@@ -4,6 +4,8 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle, FancyArrowPatch
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QDockWidget, QDoubleSpinBox, QPushButton, QListWidget, QListWidgetItem,
@@ -38,6 +40,12 @@ MATERIALS = {
         "face": "#a67c52", "edge": "#3e2723",
     },
 }
+
+
+def _blue_plasma_cmap():
+    """Plasma tronqué sur les tons bleus / indigo (base visuelle « bleu plasma »)."""
+    base = cm.get_cmap("plasma", 256)
+    return mcolors.ListedColormap(base(np.linspace(0.0, 0.52, 256)))
 
 
 def _overlaps_x(rd_a, rd_b):
@@ -264,6 +272,7 @@ class Canvas2D(FigureCanvasQTAgg):
         self._drag_offset = None
         self._on_rects_changed = on_rects_changed
         self.gravity_on = False
+        self.heatmap_on = False
 
         self._stress_patches = []
         self._arrow_artists = []
@@ -381,6 +390,10 @@ class Canvas2D(FigureCanvasQTAgg):
             self._timer.start()
         else:
             self._timer.stop()
+
+    def set_heatmap(self, enabled):
+        """True : grille bleu-plasma par pression (Pa) sur chaque bloc. False : matériau."""
+        self.heatmap_on = bool(enabled)
 
     def _physics_tick(self):
         """Fait tomber chaque bloc d'un pas, résout les collisions."""
@@ -566,7 +579,17 @@ class Canvas2D(FigureCanvasQTAgg):
             self.draw_idle()
             return
 
-        # ── Blocs : teinte matériau fixe (pas de colormap σ sur le dessin)
+        p_list = [float(rd["pressure"]) for rd in self.rects]
+        p_max = max(p_list) if p_list else 0.0
+        # Heatmap ON : toujours colormap + norme (même si toutes les pressions = 0)
+        # pour afficher la grille bleu-plasma par défaut sur chaque bloc.
+        if self.heatmap_on:
+            pressure_norm = mcolors.Normalize(vmin=0.0, vmax=max(p_max, 1.0))
+            cmap_p = _blue_plasma_cmap()
+        else:
+            pressure_norm = cmap_p = None
+
+        # ── Blocs : grille heatmap pression (esthétique) ou teinte matériau
         for i, (rd, sd) in enumerate(zip(self.rects, stress_data)):
             if sd is None:
                 continue
@@ -576,7 +599,29 @@ class Canvas2D(FigureCanvasQTAgg):
 
             mat = rd["material"]
             fc = MATERIALS.get(mat, MATERIALS["Acier"])["face"]
-            if abs(sd.get("sigma_bending_top", 0)) > 1:
+            p_pa = float(rd["pressure"])
+
+            if self.heatmap_on and pressure_norm is not None:
+                nx = max(2, min(28, int(w * 10)))
+                ny = max(2, min(28, int(h * 10)))
+                cw = w / nx
+                ch = h / ny
+                for iy in range(ny):
+                    for ix in range(nx):
+                        u = (ix + 0.5) / nx
+                        v = (iy + 0.5) / ny
+                        cell_factor = 0.5 + 0.5 * (u * v)
+                        # p_pa == 0 → bas de l’échelle (bleu plasma par défaut)
+                        val = (p_pa * cell_factor) if p_pa > 0 else 0.0
+                        c = cmap_p(pressure_norm(val))
+                        cell = Rectangle(
+                            (x + ix * cw, y + iy * ch), cw, ch,
+                            facecolor=c,
+                            edgecolor=(0.08, 0.12, 0.28, 0.45),
+                            linewidth=0.35, alpha=0.93, zorder=6)
+                        self.axes.add_patch(cell)
+                        self._stress_patches.append(cell)
+            elif abs(sd.get("sigma_bending_top", 0)) > 1:
                 for dy in (0, h / 2):
                     r = Rectangle(
                         (x, y + dy), w, h / 2,
@@ -798,6 +843,15 @@ class ControlPanel(QFrame):
         self.chk_gravity.setStyleSheet("font-weight:bold; font-size:11px;")
         self.chk_gravity.toggled.connect(self._on_gravity_toggle)
         lay_grav.addWidget(self.chk_gravity)
+
+        self.chk_heatmap = QCheckBox("Heatmap pression")
+        self.chk_heatmap.setStyleSheet("font-weight:bold; font-size:11px;")
+        self.chk_heatmap.setToolTip(
+            "Grille bleu-plasma sur chaque bloc (visible même à 0 Pa, bleu par défaut). "
+            "Couleurs selon la pression distribuée (Pa) du bloc — visuel uniquement.")
+        self.chk_heatmap.toggled.connect(self._on_heatmap_toggle)
+        lay_grav.addWidget(self.chk_heatmap)
+
         grp_grav.setLayout(lay_grav)
         layout.addWidget(grp_grav)
 
@@ -938,11 +992,29 @@ class ControlPanel(QFrame):
             QTabBar::tab  { background:#e3f2fd; color:#555; padding:6px 14px; }
             QTabBar::tab:selected { background:white; color:#1565c0; font-weight:bold; }
             QScrollArea   { border:none; }
-            QCheckBox     { color:#1565c0; }
+            QCheckBox     { color:#1565c0; spacing: 6px; }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QCheckBox::indicator:unchecked {
+                background: white;
+                border: 2px solid #90caf9;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                background: #1565c0;
+                border: 2px solid #1565c0;
+                border-radius: 3px;
+            }
         """)
 
     def _on_gravity_toggle(self, checked):
         self.canvas.set_gravity(checked)
+
+    def _on_heatmap_toggle(self, checked):
+        self.canvas.set_heatmap(checked)
+        self.physics_callback()
 
     def _on_add(self):
         mn = self.combo_mat.currentText()
