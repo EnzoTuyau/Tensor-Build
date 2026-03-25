@@ -21,6 +21,10 @@ SNAP_TOL = 0.18   # tolérance de contact (m)
 FALL_STEP = 0.12   # pas de chute par tick (m)
 TIMER_MS = 30     # ms entre chaque tick de physique
 
+# Fenêtre monde fixe (imshow / heatmap ne doit pas déclencher d’autoscale)
+AXIS_XLIM = (-2.0, 12.0)
+AXIS_YLIM = (-1.5, 12.0)
+
 # Matériaux 2D : densité, module E, limite σ, couleurs du patch (face / contour).
 MATERIALS = {
     "Acier": {
@@ -46,6 +50,17 @@ def _blue_plasma_cmap():
     """Plasma tronqué sur les tons bleus / indigo (base visuelle « bleu plasma »)."""
     base = cm.get_cmap("plasma", 256)
     return mcolors.ListedColormap(base(np.linspace(0.0, 0.52, 256)))
+
+
+def _pressure_grid_rgba(p_pa, pressure_norm, cmap_p, nx, ny):
+    """Grille (ny, nx, 4) RGBA pour heatmap pression (vectorisé, origin lower)."""
+    ix = np.linspace(0.5 / nx, 1.0 - 0.5 / nx, nx, dtype=np.float64)
+    iy = np.linspace(0.5 / ny, 1.0 - 0.5 / ny, ny, dtype=np.float64)
+    u, v = np.meshgrid(ix, iy, indexing="xy")
+    cell_factor = 0.5 + 0.5 * (u * v)
+    vals = np.where(p_pa > 0, p_pa * cell_factor, 0.0)
+    t = pressure_norm(vals)
+    return cmap_p(t)
 
 
 def _overlaps_x(rd_a, rd_b):
@@ -253,13 +268,18 @@ class ContactTooltip(QWidget):
 class Canvas2D(FigureCanvasQTAgg):
     def __init__(self, parent=None, on_rects_changed=None):
         fig = Figure(figsize=(12, 12), facecolor="white")
-        fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+        fig.subplots_adjust(left=0.08, bottom=0.08, right=0.99, top=0.99)
         self.axes = fig.add_subplot(111)
-        self.axes.set_aspect("equal")
+        # Pas "equal" ici : avec une fenêtre non carrée, matplotlib recalcule
+        # xlim/ylim à chaque draw (apply_aspect) → zoom / décalage au toggle heatmap.
+        self.axes.set_aspect("auto")
         self.axes.set_facecolor("white")
         self.axes.grid(True, color="#dddddd", linewidth=0.6, linestyle="--")
-        self.axes.set_xlim(-2, 12)
-        self.axes.set_ylim(-1.5, 12)
+        self.axes.set_xlim(*AXIS_XLIM)
+        self.axes.set_ylim(*AXIS_YLIM)
+        self.axes.set_autoscale_on(False)
+        self.axes.set_autoscalex_on(False)
+        self.axes.set_autoscaley_on(False)
         self.axes.set_xticks(range(-2, 13))
         self.axes.set_yticks(range(-1, 13))
         self.axes.tick_params(colors="#aaaaaa", labelsize=7)
@@ -281,6 +301,7 @@ class Canvas2D(FigureCanvasQTAgg):
         self._ground_line = None
         self._contact_hit_zones = []
         self._on_contact_clicked = None
+        self._heatmap_aximages = []
 
         # Timer de physique
         self._timer = QTimer()
@@ -291,6 +312,11 @@ class Canvas2D(FigureCanvasQTAgg):
         self.mpl_connect("button_press_event",   self._on_press)
         self.mpl_connect("motion_notify_event",  self._on_motion)
         self.mpl_connect("button_release_event", self._on_release)
+
+    def _lock_fixed_view(self):
+        """Fenêtre monde fixe (réappliquer après tout redraw qui pourrait bouger la vue)."""
+        self.axes.set_xlim(*AXIS_XLIM)
+        self.axes.set_ylim(*AXIS_YLIM)
 
     def set_on_contact_clicked(self, callback):
         """callback(dict) — dict : i_bot, i_top, frac, F_c, cx, y_if ; None pour désactiver."""
@@ -433,9 +459,10 @@ class Canvas2D(FigureCanvasQTAgg):
                 moved = True
 
         if moved:
+            # À chaque tick : physique + draw_stress pour coller heatmap / overlays
+            # aux patches (évite traînée si on throttlait le redraw).
             self.draw_idle()
-            if self._on_rects_changed:
-                self._on_rects_changed()
+            self._notify(refresh_list=False)
 
     # ── Blocs ────────────────────────────────
     def add_rectangle(self, w, h, material="Acier", density=None):
@@ -541,18 +568,25 @@ class Canvas2D(FigureCanvasQTAgg):
         _resolve_collision(self._drag_index, self.rects)
 
         self.draw_idle()
-        self._notify()
 
     def _on_release(self, event):
         self._drag_index = None
         self._drag_offset = None
+        # Recalcul complet après déplacement (physique + heatmap + panneau)
+        self._notify()
 
-    def _notify(self):
+    def _notify(self, refresh_list=True):
         if self._on_rects_changed:
-            self._on_rects_changed()
+            self._on_rects_changed(refresh_list=refresh_list)
 
     # ── Dessin stress + contacts ──────────────
     def draw_stress(self, stress_data, contact_pairs):
+        for im in self._heatmap_aximages:
+            try:
+                im.remove()
+            except Exception:
+                pass
+        self._heatmap_aximages.clear()
         for p in self._stress_patches:
             try:
                 p.remove()
@@ -576,6 +610,7 @@ class Canvas2D(FigureCanvasQTAgg):
         self._contact_hit_zones.clear()
 
         if not self.rects or not stress_data:
+            self._lock_fixed_view()
             self.draw_idle()
             return
 
@@ -602,25 +637,20 @@ class Canvas2D(FigureCanvasQTAgg):
             p_pa = float(rd["pressure"])
 
             if self.heatmap_on and pressure_norm is not None:
-                nx = max(2, min(28, int(w * 10)))
-                ny = max(2, min(28, int(h * 10)))
-                cw = w / nx
-                ch = h / ny
-                for iy in range(ny):
-                    for ix in range(nx):
-                        u = (ix + 0.5) / nx
-                        v = (iy + 0.5) / ny
-                        cell_factor = 0.5 + 0.5 * (u * v)
-                        # p_pa == 0 → bas de l’échelle (bleu plasma par défaut)
-                        val = (p_pa * cell_factor) if p_pa > 0 else 0.0
-                        c = cmap_p(pressure_norm(val))
-                        cell = Rectangle(
-                            (x + ix * cw, y + iy * ch), cw, ch,
-                            facecolor=c,
-                            edgecolor=(0.08, 0.12, 0.28, 0.45),
-                            linewidth=0.35, alpha=0.93, zorder=6)
-                        self.axes.add_patch(cell)
-                        self._stress_patches.append(cell)
+                nx = max(2, min(16, int(w * 10)))
+                ny = max(2, min(16, int(h * 10)))
+                rgba = _pressure_grid_rgba(p_pa, pressure_norm, cmap_p, nx, ny)
+                im = self.axes.imshow(
+                    rgba,
+                    extent=(x, x + w, y, y + h),
+                    origin="lower",
+                    aspect="auto",
+                    interpolation="nearest",
+                    zorder=6,
+                    clip_on=True,
+                )
+                im.set_alpha(0.93)
+                self._heatmap_aximages.append(im)
             elif abs(sd.get("sigma_bending_top", 0)) > 1:
                 for dy in (0, h / 2):
                     r = Rectangle(
@@ -790,6 +820,7 @@ class Canvas2D(FigureCanvasQTAgg):
                                   zorder=16, markeredgecolor="#e65100", markeredgewidth=2)
             self._cg_artist = [dot, hl, vl]
 
+        self._lock_fixed_view()
         self.draw_idle()
 
 
@@ -1166,8 +1197,9 @@ class MaterialSimulationApp(QMainWindow):
         dock.setMinimumWidth(320)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
 
-    def _on_changed(self):
-        self.panel.refresh_list()
+    def _on_changed(self, *, refresh_list=True):
+        if refresh_list:
+            self.panel.refresh_list()
         stress_data, pairs = self._calculate_physics()
         self.canvas.draw_stress(stress_data, pairs)
         self.panel.refresh_contact_popup_if_open(pairs, stress_data)
