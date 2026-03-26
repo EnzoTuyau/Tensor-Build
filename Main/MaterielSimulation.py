@@ -33,6 +33,11 @@ class MaterielSimulationApp(QMainWindow):
         scene.sol.afficher()
         scene.camera = Camera(scene.plotter)
         scene.camera.initialiser()
+        # Branche les touches WASD
+        scene.plotter.add_key_event("w", lambda: scene.camera.pan("haut"))
+        scene.plotter.add_key_event("s", lambda: scene.camera.pan("bas"))
+        scene.plotter.add_key_event("a", lambda: scene.camera.pan("gauche"))
+        scene.plotter.add_key_event("d", lambda: scene.camera.pan("droite"))
         scene.gravite = Gravite(g=9.81)
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
@@ -226,6 +231,7 @@ class MaterielSimulationApp(QMainWindow):
         scene.group_geo.setEnabled(True)
         scene.plotter.remove_actor(forme.actor)
         forme.actor = scene.plotter.add_mesh(forme.mesh, color="yellow", show_edges=True, reset_camera=False)
+        scene.camera.activer_suivi(forme.params["centre"])
 
     def dessiner_forme(scene, forme):
         scene.camera.sauvegarder()  # ← sauvegarde avant
@@ -254,21 +260,21 @@ class MaterielSimulationApp(QMainWindow):
         forme = scene.forme_selectionnee
         if forme is None:
             return
+
+        nouvelle_pos = (scene.spin_x.value(),
+                        scene.spin_y.value(),
+                        scene.spin_z.value())
+
+        scene.camera.suivre_objet(nouvelle_pos)  # ← déplace la caméra avant
+
         forme.params["rayon"] = scene.spin_radius.value()
         forme.params["longueur"] = scene.spin_length.value()
-        forme.params["centre"] = (scene.spin_x.value(),
-                                  scene.spin_y.value(),
-                                  scene.spin_z.value())
+        forme.params["centre"] = nouvelle_pos
         scene.dessiner_forme(forme)
 
-        # Garde le surlignage jaune
         scene.plotter.remove_actor(forme.actor)
         forme.actor = scene.plotter.add_mesh(
-            forme.mesh,
-            color="yellow",
-            show_edges=True,
-            reset_camera=False  # ← manquait ici
-        )
+            forme.mesh, color="yellow", show_edges=True, reset_camera=False)
 
     def update_materiel(scene):
         """Recolore uniquement la forme sélectionnée."""
@@ -467,8 +473,10 @@ class MaterielSimulationApp(QMainWindow):
                              scene.spin_x, scene.spin_y, scene.spin_z]:
                     spin.blockSignals(False)
                 break
+        scene.camera.activer_suivi(forme.params["centre"])
 
     def on_forme_choisie(scene, index):
+        scene.camera.desactiver_suivi()
         if index == 0:
             scene.group_geo.setEnabled(False)
             scene.forme_selectionnee = None
@@ -483,6 +491,7 @@ class MaterielSimulationApp(QMainWindow):
                 scene.forme_selectionnee = None
 
             scene.group_geo.setEnabled(True)
+
 
 
 
