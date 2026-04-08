@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QPushB
 from PySide6.QtCore import Qt
 
 from tensor2d import MaterialSimulationApp as App2D
-from tensor3D import MaterialSimulationApp as App3D
+# from Main.MaterielSimulation import MaterielSimulationApp as App3D
 
 
 class MenuDialog(QDialog):
@@ -16,8 +16,10 @@ class MenuDialog(QDialog):
         layout = QVBoxLayout()
         layout.setSpacing(20)
 
-        label = QLabel("Bienvenue dans TensorBuild!\nVeuillez choisir une simulation :")
-        label.setStyleSheet("font-size: 15px; font-weight: bold; color: #1565c0;")
+        label = QLabel(
+            "Bienvenue dans TensorBuild!\nVeuillez choisir une simulation :")
+        label.setStyleSheet(
+            "font-size: 15px; font-weight: bold; color: #1565c0;")
         label.setAlignment(Qt.AlignCenter)
         layout.addWidget(label)
 
@@ -57,7 +59,8 @@ class GestionnaireApplication:
 
     def open_3d(self):
         old = self.current_window
-        self.current_window = App3D(switch_callback=self.open_2d)
+        # self.current_window = App3D(switch_callback=self.open_2d)
+        self.current_window = None
         self.current_window.show()
         if old:
             old.close()
@@ -66,7 +69,6 @@ class GestionnaireApplication:
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    
     app.setQuitOnLastWindowClosed(False)
 
     manager = GestionnaireApplication()
