@@ -2,7 +2,7 @@ import sys
 from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
 
-from tensor2D import MaterialSimulationApp as App2D
+from tensor2d import MaterialSimulationApp as App2D
 from tensor3D import MaterialSimulationApp as App3D
 
 
