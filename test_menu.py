@@ -42,6 +42,7 @@ class MenuDialog(QDialog):
         self.mode = "2D"
         self._refresh_mode_buttons()
 
+
         self.setStyleSheet(
             """
             QDialog {
@@ -123,6 +124,7 @@ class MenuDialog(QDialog):
                 background-color: #17253a;
             }
             """
+
         )
 
     def _build_header(self):

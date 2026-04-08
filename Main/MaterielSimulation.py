@@ -17,6 +17,8 @@ class MaterielSimulationApp(QMainWindow):
     def __init__(scene, switch_callback=None):
         super().__init__()
         scene.switch_callback = switch_callback
+        scene.showMaximized()
+
 
         scene.setWindowTitle("Tensor Build - Simulateur de Structure")
         scene.resize(1200, 800)
