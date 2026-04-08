@@ -1,7 +1,13 @@
-import numpy as np
+from Formes.Forme import Forme
+import pyvista as pv
 
+class Cylindre(Forme):
+    NOM = "Cylindre"
 
-class Cylindre:
+    def construire_mesh(self):
+        return pv.Cylinder(center=self.c, radius=self.r,
+                           height=self.l, direction=(1, 0, 0))
+    '''
     def __init__(self, rayon, longueur, materiau, epaisseur=None):
         self.r = rayon
         self.l = longueur
@@ -21,3 +27,4 @@ class Cylindre:
         # Formule simplifiée pour la rigidité axiale : K = (A*E)/L
         k_axiale = (A * E) / self.l
         return k_axiale
+        '''
