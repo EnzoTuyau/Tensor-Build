@@ -1,68 +1,34 @@
 import sys
-import platform
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 
 
-class VtkQtPlotter(QtInteractor):
-    """
-    Widget Qt intégrant PyVista via pyvistaqt.
-    """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # Compatibilité avec le code existant qui ajoute `plotter.interactor` au layout.
-        if not hasattr(self, "interactor"):
-            self.interactor = self
-
-
-if platform.system() == "Darwin":
-    class SafeQtInteractor(QtInteractor):
-        """Works around the macOS + PySide6 6.10 infinite  paintEvent/Render
-        loop (VTK issue #19915) by deferring renders via QTimer."""
-
-        _render_deferred = False
-
-        def paintEvent(self, ev):
-            if not self._render_deferred:
-                self._render_deferred = True
-                QTimer.singleShot(0, self._deferred_render)
-
-        def _deferred_render(self):
-            self.GetRenderWindow().Render()
-            self._render_deferred = False
-else:
-    SafeVtkQtPlotter = VtkQtPlotter
-
-
-class MaterielSimulationApp(QMainWindow):
+class MaterialSimulationApp(QMainWindow):
     # --- scene ---
-    def __init__(scene):
+    def __init__(scene, switch_callback=None):
         super().__init__()
+
+        scene.switch_callback = switch_callback
 
         # --- Configuration de la fenêtre ---
         scene.setWindowTitle("Tensor Build - Simulateur de Structure")
         scene.resize(1200, 800)
 
         # Widget central
-        # espace à droite réservé pour les boutons
         scene.central_widget = QWidget()
-        # centre les boutons et les rends le coeur de l'interface
         scene.setCentralWidget(scene.central_widget)
         scene.layout = QHBoxLayout(scene.central_widget)
 
         # --- 1. Zone 3D (Gauche) ---
-        # Intégration VTK + PyVista via QVTKRenderWindowInteractor (sans pyvistaqt)
-        scene.plotter = SafeVtkQtPlotter(scene.central_widget)
-        # plotter permet de montrer tout ce que l'utilisateur voit
+        # On utilise QtInteractor de pyvistaqt pour intégrer la 3D dans Qt
+        scene.plotter = QtInteractor(scene.central_widget)
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
-        # stretch=2 permet de gérer la proportion de l'interface d'utilisation
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
         # --- 2. Panneau de Contrôle (Droite) ---
@@ -72,20 +38,26 @@ class MaterielSimulationApp(QMainWindow):
 
         scene.setup_ui_controls()
 
-        # Liste pour stocker nos objets
+        # Liste pour stocker nos objets (meshes)
         scene.objects = []
         scene.current_actor = None
 
     def setup_ui_controls(scene):
-        # Crée les boutons et menus à droite
+        """Crée les boutons et menus à droite"""
 
-        # Section : Ajouter une forme
+        # --- NOUVEAU BOUTON DE BASCULE ---
+        scene.btn_switch_2d = QPushButton("🖥️ Retourner en mode 2D")
+        scene.btn_switch_2d.setStyleSheet("background-color: #1565c0; font-size: 12px; color: white;")
+        scene.btn_switch_2d.clicked.connect(scene.switch_callback)
+        scene.control_layout.addWidget(scene.btn_switch_2d)
+        # ---------------------------------
+
+        # --- Section : Ajouter une forme ---
         group_add = QGroupBox("1. Ajouter une Pièce")
         layout_add = QVBoxLayout()
 
         scene.shape_selector = QComboBox()
-        scene.shape_selector.addItems(
-            ["Cylindre", "Poutre (Carrée)", "Prisme Triangulaire", "Sphère", "Cube", "Vis"])
+        scene.shape_selector.addItems(["Cylindre", "Poutre (Carrée)"])
         layout_add.addWidget(QLabel("Forme :"))
         layout_add.addWidget(scene.shape_selector)
 
@@ -137,7 +109,7 @@ class MaterielSimulationApp(QMainWindow):
         group_mat = QGroupBox("3. Matériau")
         layout_mat = QVBoxLayout()
 
-        scene.selecteur_materiaux = QComboBox()
+        scene.material_selector = QComboBox()
         # Nom, Module de Young (Pa), Couleur
         scene.materials_db = {
             "Acier": (200e9, "grey"),
@@ -145,20 +117,18 @@ class MaterielSimulationApp(QMainWindow):
             "Bois": (11e9, "tan"),
             "Plastique": (3e9, "lightblue")
         }
-        scene.selecteur_materiaux.addItems(scene.materials_db.keys())
-        scene.selecteur_materiaux.currentTextChanged.connect(
-            scene.update_materiel)
+        scene.material_selector.addItems(scene.materials_db.keys())
+        scene.material_selector.currentTextChanged.connect(scene.update_material)
 
         layout_mat.addWidget(QLabel("Type de matériau :"))
-        layout_mat.addWidget(scene.selecteur_materiaux)
+        layout_mat.addWidget(scene.material_selector)
 
         group_mat.setLayout(layout_mat)
         scene.control_layout.addWidget(group_mat)
 
         # --- Section : Simulation ---
         scene.btn_sim = QPushButton("Lancer Simulation (Calcul SciPy)")
-        scene.btn_sim.setStyleSheet(
-            "background-color: #ffcccc; font-weight: bold; padding: 10px;")
+        scene.btn_sim.setStyleSheet("background-color: #ffcccc; font-weight: bold; padding: 10px;")
         scene.btn_sim.clicked.connect(scene.run_dummy_simulation)
         scene.control_layout.addWidget(scene.btn_sim)
 
@@ -174,48 +144,44 @@ class MaterielSimulationApp(QMainWindow):
             "mesh": None,
             "actor": None,
             "params": {
-                "rayon": scene.spin_radius.value(),
-                "longueur": scene.spin_length.value(),
-                "centre": (scene.spin_x.value(), scene.spin_y.value(), scene.spin_z.value())
+                "radius": scene.spin_radius.value(),
+                "length": scene.spin_length.value(),
+                "center": (scene.spin_x.value(), scene.spin_y.value(), scene.spin_z.value())
             }
         }
 
         scene.objects.append(obj_data)
-        scene.dessiner_formes(obj_data)
+        scene.draw_shape(obj_data)
 
-    def dessiner_formes(scene, obj_data):
+    def draw_shape(scene, obj_data):
+        """Génère le maillage PyVista et l'affiche"""
+        # Nettoyer l'ancien acteur si on met à jour
         if obj_data["actor"]:
             scene.plotter.remove_actor(obj_data["actor"])
 
-        r = obj_data["params"]["rayon"]
-        l = obj_data["params"]["longueur"]
-        c = obj_data["params"]["centre"]
-
+        # Création de la géométrie
         if obj_data["type"] == "Cylindre":
-            mesh = pv.Cylinder(center=c, radius=r, height=l, direction=(1, 0, 0))
-
-        elif obj_data["type"] == "Poutre (Carrée)" or obj_data["type"] == "Cube":
-            # On utilise Cube pour la poutre en changeant sa longueur sur l'axe X
-            mesh = pv.Cube(center=c, x_length=l, y_length=r * 2, z_length=r * 2)
-
-        elif obj_data["type"] == "Sphère":
-            mesh = pv.Sphere(center=c, radius=r)
-
-        elif obj_data["type"] == "Prisme Triangulaire":
-            # PyVista n'a pas de "Prisme" direct, on utilise un Cylindre à 3 côtés
-            mesh = pv.Cylinder(center=c, radius=r, height=l, resolution=3, direction=(1, 0, 0))
-
-        elif obj_data["type"] == "Vis":
-            # On simule une vis par un cylindre très fin
-            mesh = pv.Cylinder(center=c, radius=r * 0.5, height=l, direction=(1, 0, 0))
-
-        elif obj_data["type"] == "Cube":
-            # Sécurité si aucune forme ne correspond
-            cote = r * 2
-            mesh = pv.Cube(center=c, x_length=cote, y_length=cote, z_length=cote)
+            mesh = pv.Cylinder(
+                radius=obj_data["params"]["radius"],
+                height=obj_data["params"]["length"],
+                center=obj_data["params"]["center"],
+                direction=(1, 0, 0),  # Axe X par défaut
+                resolution=30
+            )
+        else:  # Poutre Carrée (Box)
+            r = obj_data["params"]["radius"]  # On utilise rayon comme demi-largeur
+            l = obj_data["params"]["length"]
+            c = obj_data["params"]["center"]
+            # Création d'une boite : bounds=(x_min, x_max, y_min, y_max, z_min, z_max)
+            mesh = pv.Cube(
+                center=c,
+                x_length=l,
+                y_length=r * 2,
+                z_length=r * 2
+            )
 
         # Récupérer la couleur du matériau actuel
-        mat_name = scene.selecteur_materiaux.currentText()
+        mat_name = scene.material_selector.currentText()
         color = scene.materials_db[mat_name][1]
 
         # Ajouter à la scène
@@ -235,17 +201,16 @@ class MaterielSimulationApp(QMainWindow):
         # Idéalement, il faudrait une liste pour sélectionner quel objet modifier
         current_obj = scene.objects[-1]
 
-        current_obj["params"]["rayon"] = scene.spin_radius.value()
-        current_obj["params"]["longueur"] = scene.spin_length.value()
-        current_obj["params"]["centre"] = (
-            scene.spin_x.value(), scene.spin_y.value(), scene.spin_z.value())
+        current_obj["params"]["radius"] = scene.spin_radius.value()
+        current_obj["params"]["length"] = scene.spin_length.value()
+        current_obj["params"]["center"] = (scene.spin_x.value(), scene.spin_y.value(), scene.spin_z.value())
 
-        scene.dessiner_formes(current_obj)
+        scene.draw_shape(current_obj)
 
-    def update_materiel(scene):
+    def update_material(scene):
         """Change la couleur selon le matériau"""
         if scene.objects:
-            scene.dessiner_formes(scene.objects[-1])
+            scene.draw_shape(scene.objects[-1])
 
     def run_dummy_simulation(scene):
         """C'est ici que tu connecteras ton code SciPy plus tard"""
@@ -266,18 +231,12 @@ class MaterielSimulationApp(QMainWindow):
         stress_values = np.linspace(0, 100, mesh.n_points)
 
         scene.plotter.remove_actor(last_obj["actor"])
-        scene.plotter.add_mesh(mesh, scalars=stress_values,
-                               cmap="jet", show_edges=False)
+        scene.plotter.add_mesh(mesh, scalars=stress_values, cmap="jet", show_edges=False)
         scene.plotter.add_scalar_bar(title="Contrainte de Von Mises (MPa)")
 
 
-# permet d'utiliser les fonctions du main sans ouvrir la fenêtre (l'interface)
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MaterielSimulationApp()
+    window = MaterialSimulationApp()
     window.show()
-    window.raise_()
-    window.activateWindow()
-    # Initialisation requise pour l'interacteur VTK
-    window.plotter.GetRenderWindow().GetInteractor().Initialize()
     sys.exit(app.exec())
