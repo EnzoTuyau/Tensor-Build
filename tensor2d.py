@@ -1,17 +1,12 @@
 """
-Application 2D — empilement de blocs et repères de résistance des matériaux.
+tensor2D.py  —  Tensor Build
+Simulateur 2D de résistance des matériaux.
 
-PySide6 pour les contrôles, matplotlib pour le plan. Tu poses des blocs, des
-charges, tu actives la gravité ; les contraintes et le CdG s’affichent dans
-l’onglet Résultats. La heatmap pression est un rendu visuel (pas un calcul FEA).
-
-Chaque bloc (`canvas.rects[i]`) expose après chaque `draw_stress` :
-  • `heatmap_matrice` : `numpy.ndarray` de forme `(ny, nx)`, pression (Pa) par cellule,
-    ligne 0 = bas du bloc, colonne 0 = gauche (repère monde, `imshow` origin lower).
-  • `heatmap_cellules` : `(nx, ny)` ou `None` si la heatmap est désactivée.
+On peut ajouter des blocs rectangulaires, les déplacer,
+leur appliquer des forces, et voir les contraintes en temps réel.
 """
+
 import sys
-import functools
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -20,1387 +15,996 @@ import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QDockWidget, QDoubleSpinBox, QPushButton, QListWidget, QListWidgetItem,
-    QLabel, QFormLayout, QGroupBox, QFrame, QScrollArea, QTabWidget,
-    QComboBox, QCheckBox, QSizePolicy,
+    QDockWidget, QDoubleSpinBox, QPushButton, QListWidget, QLabel,
+    QFormLayout, QGroupBox, QFrame, QScrollArea, QTabWidget, QComboBox,
+    QCheckBox,
 )
-from PySide6.QtCore import Qt, QTimer, QPoint, QRect
-from PySide6.QtGui import QGuiApplication
-# ─────────────────────────────────────────────
-GRAVITY = 9.81
-GROUND_Y = 0.0
-SNAP_TOL = 0.18   # tolérance de contact (m)
-FALL_STEP = 0.12   # pas de chute par tick (m)
-TIMER_MS = 30     # ms entre chaque tick de physique
-
-# Fenêtre monde fixe (imshow / heatmap ne doit pas déclencher d’autoscale)
-AXIS_XLIM = (-2.0, 12.0)
-AXIS_YLIM = (-1.5, 12.0)
-
-# Résolution max de la grille heatmap (largeur × hauteur en cellules)
-HEATMAP_CELLES_MAX = 16
-
-# Matériaux 2D : densité, module E, limite σ, couleurs du patch (face / contour).
-MATERIALS = {
-    "Acier": {
-        "density": 7850, "E": 210e9, "sigma_y": 250e6,
-        "face": "#b0bec5", "edge": "#37474f",
-    },
-    "Béton": {
-        "density": 2400, "E": 30e9, "sigma_y": 30e6,
-        "face": "#bdbdbd", "edge": "#424242",
-    },
-    "Aluminium": {
-        "density": 2700, "E": 70e9, "sigma_y": 270e6,
-        "face": "#e3f2fd", "edge": "#0277bd",
-    },
-    "Bois": {
-        "density": 600, "E": 12e9, "sigma_y": 40e6,
-        "face": "#a67c52", "edge": "#3e2723",
-    },
-}
+from PySide6.QtCore import Qt, QTimer
 
 
-def _blue_plasma_cmap():
-    """Plasma tronqué sur les tons bleus / indigo (base visuelle « bleu plasma »)."""
-    base = cm.get_cmap("plasma", 256)
-    return mcolors.ListedColormap(base(np.linspace(0.0, 0.52, 256)))
+# ──────────────────────────────────────────────────────────────
+#  Constantes globales
+# ──────────────────────────────────────────────────────────────
+
+GRAVITY   = 9.81   # accélération gravitationnelle (m/s²)
+GROUND_Y  = 0.0    # position y du sol sur le canvas
+SNAP_TOL  = 0.18   # distance max pour considérer deux blocs en contact (m)
+FALL_STEP = 0.12   # distance de chute par tick de physique (m)
+TIMER_MS  = 30     # intervalle du timer de physique (ms) — ~33 fps
 
 
-def _pressure_grid_pa(p_pa, nx, ny):
+# ──────────────────────────────────────────────────────────────
+#  Fonctions utilitaires de physique
+# ──────────────────────────────────────────────────────────────
+
+def _overlaps_x(bloc_a, bloc_b):
     """
-    Matrice (ny, nx) des pressions effectives par cellule (Pa), même logique que le rendu.
-
-    Indexation : [j, i] = ligne j depuis le bas du bloc, colonne i depuis la gauche.
+    Vérifie si deux blocs se chevauchent horizontalement.
+    Utilisé pour savoir si un contact vertical est possible.
     """
-    ix = np.linspace(0.5 / nx, 1.0 - 0.5 / nx, nx, dtype=np.float64)
-    iy = np.linspace(0.5 / ny, 1.0 - 0.5 / ny, ny, dtype=np.float64)
-    u, v = np.meshgrid(ix, iy, indexing="xy")
-    cell_factor = 0.5 + 0.5 * (u * v)
-    return np.where(p_pa > 0, p_pa * cell_factor, 0.0)
+    xa, _ = bloc_a["patch"].get_xy()
+    wa    = bloc_a["patch"].get_width()
+    xb, _ = bloc_b["patch"].get_xy()
+    wb    = bloc_b["patch"].get_width()
+    return xa < xb + wb and xb < xa + wa
 
 
-def _pressure_grid_rgba_from_pa(pa, pressure_norm, cmap_p):
-    """Image (ny, nx, 4) RGBA à partir de la matrice pression (Pa)."""
-    return cmap_p(pressure_norm(pa))
-
-
-def _pressure_grid_rgba(p_pa, pressure_norm, cmap_p, nx, ny):
-    """Grille (ny, nx, 4) RGBA pour heatmap pression (vectorisé, origin lower)."""
-    pa = _pressure_grid_pa(p_pa, nx, ny)
-    return _pressure_grid_rgba_from_pa(pa, pressure_norm, cmap_p)
-
-
-def _vider_serie_artists(serie):
-    """Retire chaque artiste matplotlib de l’axe puis vide la liste."""
-    for artiste in list(serie):
-        try:
-            artiste.remove()
-        except Exception:
-            pass
-    serie.clear()
-
-
-def _geom_patch(rd):
-    """(x, y, largeur, hauteur) du rectangle matplotlib du bloc."""
-    p = rd["patch"]
-    x, y = p.get_xy()
-    return x, y, p.get_width(), p.get_height()
-
-
-def _charge_verticale_equivalente(rd):
-    """Poids + forces appliquées sur le bloc, projetées comme charge « sur le dessous »."""
-    x, y, w, h = _geom_patch(rd)
-    return (
-        rd["density"] * w * h * GRAVITY
-        + rd["ext_force"]
-        + rd["pressure"] * w
-    )
-
-
-def _hauteur_appui_max(rects, idx):
-    """Plus haute surface sous ce bloc : sol ou sommet d’un autre bloc en recouvrement."""
-    x_me, y_me, w_me, _ = _geom_patch(rects[idx])
-    floor_y = GROUND_Y
-    for i2, rd2 in enumerate(rects):
-        if i2 == idx:
-            continue
-        x2, y2, w2, h2 = _geom_patch(rd2)
-        if x_me < x2 + w2 and x2 < x_me + w_me:
-            top2 = y2 + h2
-            if top2 <= y_me + 0.001:
-                floor_y = max(floor_y, top2)
-    return floor_y
-
-
-def _statistiques_globales_section(rects):
-    """Aire, CdG, inerties et masse (blocs rectangulaires empilés, 1 m d’épaisseur)."""
-    total_area = 0.0
-    sx = sy = 0.0
-    masse = 0.0
-    geoms = []
-    for rd in rects:
-        x, y, w, h = _geom_patch(rd)
-        a = w * h
-        geoms.append((x, y, w, h, a))
-        total_area += a
-        sx += (x + w / 2) * a
-        sy += (y + h / 2) * a
-        masse += rd["density"] * a
-    XG = sx / total_area
-    YG = sy / total_area
-    Ixx = sum(
-        (w * h**3) / 12 + w * h * (y + h / 2 - YG) ** 2
-        for x, y, w, h, a in geoms
-    )
-    Iyy = sum(
-        (h * w**3) / 12 + w * h * (x + w / 2 - XG) ** 2
-        for x, y, w, h, a in geoms
-    )
-    return total_area, XG, YG, Ixx, Iyy, masse
-
-
-def _statut_utilisation(util_pct):
-    """Libellé + pictogramme selon le pourcentage d’utilisation par rapport à σ_y."""
-    if util_pct < 80:
-        return "OK", "✓"
-    if util_pct < 100:
-        return "⚠️ Attention", "!"
-    return "❌ RUPTURE", "✗"
-
-
-def _overlaps_x(rd_a, rd_b):
-    ax, _ = rd_a["patch"].get_xy()
-    aw = rd_a["patch"].get_width()
-    bx, _ = rd_b["patch"].get_xy()
-    bw = rd_b["patch"].get_width()
-    return ax < bx + bw and bx < ax + aw
-
-
-def _contact_pairs(rects, tol=SNAP_TOL):
-    """[(i_bottom, i_top, overlap_frac), ...]"""
-    pairs = []
-    for i in range(len(rects)):
-        for j in range(len(rects)):
+def _contact_pairs(blocs, tol=SNAP_TOL):
+    """
+    Parcourt tous les blocs et retourne les paires en contact vertical.
+    Une paire (i_bas, i_haut, fraction) signifie que le bloc i_haut
+    repose sur le bloc i_bas, avec une fraction de surface en commun.
+    """
+    paires = []
+    for i in range(len(blocs)):
+        for j in range(len(blocs)):
             if i == j:
                 continue
-            xb, yb, wb, hb = _geom_patch(rects[i])
-            xt, yt = rects[j]["patch"].get_xy()
-            wt = rects[j]["patch"].get_width()
-            if abs((yb + hb) - yt) <= tol and _overlaps_x(rects[i], rects[j]):
-                overlap = min(xb + wb, xt + wt) - max(xb, xt)
-                frac = overlap / min(wb, wt)
-                pairs.append((i, j, frac))
-    return pairs
+
+            xi, yi = blocs[i]["patch"].get_xy()
+            wi, hi = blocs[i]["patch"].get_width(), blocs[i]["patch"].get_height()
+            xj, yj = blocs[j]["patch"].get_xy()
+            wj     = blocs[j]["patch"].get_width()
+
+            # Le dessus du bloc i est-il proche du dessous du bloc j ?
+            contact_vertical = abs((yi + hi) - yj) <= tol
+            if contact_vertical and _overlaps_x(blocs[i], blocs[j]):
+                largeur_contact = min(xi + wi, xj + wj) - max(xi, xj)
+                fraction        = largeur_contact / min(wi, wj)
+                paires.append((i, j, fraction))
+
+    return paires
 
 
-def _resolve_collision(moving_idx, rects):
-    """Écarte le bloc déplacé d’un chevauchement (priorité au déplacement vertical)."""
-    rd_m = rects[moving_idx]
-    pm = rd_m["patch"]
-    mx, my = pm.get_xy()
-    mw, mh = pm.get_width(), pm.get_height()
-    collided = False
+def _resoudre_collision(idx_mobile, blocs):
+    """
+    Quand un bloc en est glissé dans un autre, cette fonction
+    le repousse vers la sortie la plus proche (axe de moindre pénétration).
+    C'est ce qui empêche les blocs de se traverser pendant le drag.
+    """
+    patch_mobile    = blocs[idx_mobile]["patch"]
+    mx, my          = patch_mobile.get_xy()
+    largeur, hauteur = patch_mobile.get_width(), patch_mobile.get_height()
+    collision       = False
 
-    for i, rd_o in enumerate(rects):
-        if i == moving_idx:
+    for i, autre_bloc in enumerate(blocs):
+        if i == idx_mobile:
             continue
-        po = rd_o["patch"]
-        ox, oy = po.get_xy()
-        ow, oh = po.get_width(), po.get_height()
 
-        x_overlap = mx < ox + ow and ox < mx + mw
-        y_overlap = my < oy + oh and oy < my + mh
+        patch_autre     = autre_bloc["patch"]
+        ox, oy          = patch_autre.get_xy()
+        ow, oh          = patch_autre.get_width(), patch_autre.get_height()
 
-        if x_overlap and y_overlap:
-            pen_top = (oy + oh) - my
-            pen_bottom = (my + mh) - oy
-            pen_right = (ox + ow) - mx
-            pen_left = (mx + mw) - ox
+        # Test de chevauchement AABB (boîte englobante)
+        chevauche_x = mx < ox + ow and ox < mx + largeur
+        chevauche_y = my < oy + oh and oy < my + hauteur
 
-            min_pen = min(pen_top, pen_bottom, pen_right, pen_left)
+        if chevauche_x and chevauche_y:
+            # Calcule la profondeur de pénétration sur chaque côté
+            penet_haut   = (oy + oh) - my      # bloc monte sur l'autre
+            penet_bas    = (my + hauteur) - oy  # bloc descend sous l'autre
+            penet_droite = (ox + ow) - mx
+            penet_gauche = (mx + largeur) - ox
 
-            if min_pen == pen_top:
-                pm.set_xy((mx, oy + oh))
-            elif min_pen == pen_bottom:
-                pm.set_xy((mx, oy - mh))
-            elif min_pen == pen_right:
-                pm.set_xy((ox + ow, my))
+            # On choisit la sortie la moins coûteuse
+            min_penet = min(penet_haut, penet_bas, penet_droite, penet_gauche)
+
+            if min_penet == penet_haut:
+                patch_mobile.set_xy((mx, oy + oh))      # pose par-dessus
+            elif min_penet == penet_bas:
+                patch_mobile.set_xy((mx, oy - hauteur)) # glisse en dessous
+            elif min_penet == penet_droite:
+                patch_mobile.set_xy((ox + ow, my))      # pousse à droite
             else:
-                pm.set_xy((ox - mw, my))
+                patch_mobile.set_xy((ox - largeur, my)) # pousse à gauche
 
-            mx, my = pm.get_xy()
-            collided = True
+            # Relit la position après correction (peut avoir changé)
+            mx, my = patch_mobile.get_xy()
+            collision = True
 
-    return collided
-
-
-# ─────────────────────────────────────────────
-#  Infobulle contact (fenêtre type tooltip + ×, déplaçable)
-# ─────────────────────────────────────────────
-class ContactTooltip(QWidget):
-    def __init__(self, parent=None):
-        # Fenêtre normale (pas Popup / pas seulement Tool) : sur macOS les Tool
-        # sans parent peuvent ne pas s’afficher ; Popup se ferme au clic canvas.
-        super().__init__(
-            parent,
-            Qt.WindowType.Window
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint,
-        )
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setObjectName("ContactTooltip")
-        self._bounds = QRect()
-        self._drag_offset = None
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 6, 10, 10)
-        lay.setSpacing(4)
-        head = QHBoxLayout()
-        head.setSpacing(6)
-        self._drag_hint = QWidget()
-        self._drag_hint.setMinimumHeight(18)
-        self._drag_hint.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._drag_hint.setCursor(Qt.CursorShape.SizeAllCursor)
-        self._drag_hint.setToolTip(
-            "Glisser pour déplacer (reste dans le plan de dessin)")
-        head.addWidget(self._drag_hint, stretch=1)
-        self._btn_close = QPushButton("×")
-        self._btn_close.setFixedSize(22, 22)
-        self._btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_close.setStyleSheet(
-            "QPushButton { background:#ff6f00; color:white; font-size:14px; "
-            "font-weight:bold; border:none; border-radius:3px; } "
-            "QPushButton:hover { background:#e65100; }")
-        self._btn_close.setToolTip("Fermer")
-        self._btn_close.clicked.connect(self.hide)
-        head.addWidget(self._btn_close)
-        lay.addLayout(head)
-        self._lbl = QLabel()
-        self._lbl.setWordWrap(True)
-        self._lbl.setTextFormat(Qt.TextFormat.RichText)
-        self._lbl.setStyleSheet(
-            "font-family: Consolas; font-size: 10px; color: #1a1a1a;")
-        lay.addWidget(self._lbl)
-        self.setStyleSheet(
-            "QWidget#ContactTooltip { background:#fffef0; color:#1a1a1a; "
-            "border:1px solid #c9a000; border-radius:5px; }")
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setMinimumSize(180, 72)
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.raise_()
-
-    def _drag_blocked_widget(self, child):
-        if child is None:
-            return False
-        return (
-            child is self._btn_close
-            or self._btn_close.isAncestorOf(child))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            ch = self.childAt(event.position().toPoint())
-            if not self._drag_blocked_widget(ch):
-                self._drag_offset = (
-                    event.globalPosition().toPoint() - self.pos())
-                self.grabMouse()
-                self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if (self._drag_offset is not None
-                and event.buttons() & Qt.MouseButton.LeftButton):
-            p = event.globalPosition().toPoint() - self._drag_offset
-            self.move(self._clamp_top_left(p))
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self._drag_offset is not None:
-                self.releaseMouse()
-                self._drag_offset = None
-            self.setCursor(Qt.CursorShape.OpenHandCursor)
-        super().mouseReleaseEvent(event)
-
-    def set_plot_bounds_global(self, rect: QRect):
-        """Rectangle global des axes : l’infobulle ne sort pas de ce plan."""
-        self._bounds = QRect(rect)
-
-    def _clamp_top_left(self, top_left: QPoint) -> QPoint:
-        x, y = top_left.x(), top_left.y()
-        w, h = self.width(), self.height()
-        if w < 2 or h < 2:
-            self.adjustSize()
-            w, h = self.width(), self.height()
-        if self._bounds.isNull() or self._bounds.isEmpty():
-            return QPoint(x, y)
-        m = 2
-        r = self._bounds
-        x_min, y_min = r.left() + m, r.top() + m
-        x_max = r.right() - w - m
-        y_max = r.bottom() - h - m
-        if x_max < x_min:
-            x = r.left() + m
-        else:
-            x = min(max(x_min, x), x_max)
-        if y_max < y_min:
-            y = r.top() + m
-        else:
-            y = min(max(y_min, y), y_max)
-        return QPoint(x, y)
-
-    def clamp_to_bounds(self):
-        self.move(self._clamp_top_left(self.pos()))
-
-    def set_rich_text(self, html):
-        self._lbl.setText(html)
+    return collision
 
 
-# ─────────────────────────────────────────────
-#  Canvas 2D
-# ─────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+#  Canvas 2D  —  zone de dessin principale
+# ──────────────────────────────────────────────────────────────
+
 class Canvas2D(FigureCanvasQTAgg):
-    def __init__(self, parent=None, on_rects_changed=None):
+    """
+    Fenêtre matplotlib embarquée dans Qt.
+    Gère l'affichage des blocs, le drag & drop, la gravité,
+    et le rendu visuel des contraintes.
+    """
+
+    def __init__(self, parent=None, on_blocs_changes=None):
+        # Création de la figure matplotlib avec fond blanc
         fig = Figure(figsize=(12, 12), facecolor="white")
-        fig.subplots_adjust(left=0.08, bottom=0.08, right=0.99, top=0.99)
+        fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+
         self.axes = fig.add_subplot(111)
-        # Pas "equal" ici : avec une fenêtre non carrée, matplotlib recalcule
-        # xlim/ylim à chaque draw (apply_aspect) → zoom / décalage au toggle heatmap.
-        self.axes.set_aspect("auto")
+        self.axes.set_aspect("equal")
         self.axes.set_facecolor("white")
         self.axes.grid(True, color="#dddddd", linewidth=0.6, linestyle="--")
-        self.axes.set_xlim(*AXIS_XLIM)
-        self.axes.set_ylim(*AXIS_YLIM)
-        self.axes.set_autoscale_on(False)
-        self.axes.set_autoscalex_on(False)
-        self.axes.set_autoscaley_on(False)
+        self.axes.set_xlim(-2, 12)
+        self.axes.set_ylim(-1.5, 12)
         self.axes.set_xticks(range(-2, 13))
         self.axes.set_yticks(range(-1, 13))
         self.axes.tick_params(colors="#aaaaaa", labelsize=7)
-        for spine in self.axes.spines.values():
-            spine.set_edgecolor("#cccccc")
+        for bordure in self.axes.spines.values():
+            bordure.set_edgecolor("#cccccc")
+
         super().__init__(fig)
 
-        self.rects = []
-        self._drag_index = None
-        self._drag_offset = None
-        self._on_rects_changed = on_rects_changed
-        self.gravity_on = False
-        self.heatmap_on = False
+        # État interne
+        self.blocs              = []      # liste de dicts {patch, material, density, ...}
+        self._idx_drag          = None    # index du bloc en cours de drag
+        self._offset_drag       = None    # décalage souris/coin du bloc
+        self._on_blocs_changes  = on_blocs_changes
+        self.gravite_active     = False
 
-        self._stress_patches = []
-        self._arrow_artists = []
-        self._cg_artist = None
-        self._ground_patch = None
-        self._ground_line = None
-        self._contact_hit_zones = []
-        self._on_contact_clicked = None
-        self._heatmap_aximages = []
+        # Artistes matplotlib à nettoyer à chaque redraw
+        self._patches_stress    = []
+        self._artistes_fleches  = []
+        self._artiste_cg        = None
+        self._patch_sol         = None
+        self._ligne_sol         = None
 
-        # Timer de physique
-        self._timer = QTimer()
-        self._timer.setInterval(TIMER_MS)
-        self._timer.timeout.connect(self._physics_tick)
+        # Timer pour la simulation de chute (gravité)
+        self._timer_physique = QTimer()
+        self._timer_physique.setInterval(TIMER_MS)
+        self._timer_physique.timeout.connect(self._tick_physique)
 
-        self._draw_ground()
-        self.mpl_connect("button_press_event",   self._on_press)
-        self.mpl_connect("motion_notify_event",  self._on_motion)
-        self.mpl_connect("button_release_event", self._on_release)
+        self._dessiner_sol()
 
-    def _lock_fixed_view(self):
-        """Fenêtre monde fixe (réappliquer après tout redraw qui pourrait bouger la vue)."""
-        self.axes.set_xlim(*AXIS_XLIM)
-        self.axes.set_ylim(*AXIS_YLIM)
+        # Connexion des événements souris matplotlib
+        self.mpl_connect("button_press_event",   self._souris_appui)
+        self.mpl_connect("motion_notify_event",  self._souris_mouvement)
+        self.mpl_connect("button_release_event", self._souris_relache)
 
-    def set_on_contact_clicked(self, callback):
-        """callback(dict) — dict : i_bot, i_top, frac, F_c, cx, y_if ; None pour désactiver."""
-        self._on_contact_clicked = callback
+    # ── Sol ──────────────────────────────────────────────────
 
-    def _data_to_global(self, xd, yd):
-        """Point données (m) → coordonnées globales écran du canvas."""
-        fig = self.figure
-        disp = self.axes.transData.transform((xd, yd))
-        x_disp, y_disp = float(disp[0]), float(disp[1])
-        h = float(fig.bbox.height)
-        x_qt = int(round(x_disp))
-        y_qt = int(round(h - y_disp))
-        return self.mapToGlobal(QPoint(x_qt, y_qt))
-
-    def _mpl_press_to_global(self, event):
-        """Clic matplotlib (pixels figure, origine bas-gauche) → global Qt."""
-        try:
-            x, y = float(event.x), float(event.y)
-        except (TypeError, ValueError):
-            return None
-        h = float(self.figure.bbox.height)
-        if h < 1:
-            return None
-        return self.mapToGlobal(
-            QPoint(int(round(x)), int(round(h - y))))
-
-    def ground_global_rect(self):
-        """Rectangle écran (global) couvrant le sol dessiné (approx. boîte englobante)."""
+    def _dessiner_sol(self):
+        """Dessine la bande verte hachurée représentant le sol encastré."""
         xmin, xmax = self.axes.get_xlim()
-        y_lo = GROUND_Y - 0.52
-        y_hi = GROUND_Y + 0.02
-        pts = [
-            self._data_to_global(xmin, y_lo),
-            self._data_to_global(xmax, y_lo),
-            self._data_to_global(xmax, y_hi),
-            self._data_to_global(xmin, y_hi),
-        ]
-        xs = [p.x() for p in pts]
-        ys = [p.y() for p in pts]
-        return QRect(
-            min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
-    def axes_global_rect(self):
-        """Rectangle global du plan de dessin (zone des axes matplotlib)."""
-        fig = self.figure
-        try:
-            self.draw()
-        except Exception:
-            pass
-        try:
-            r = self.axes.get_window_extent(renderer=self.get_renderer())
-        except Exception:
-            r = self.axes.get_window_extent()
-        H = float(fig.bbox.height)
-        if H < 1 or r.width < 2 or r.height < 2:
-            g = self.mapToGlobal(QPoint(0, 0))
-            return QRect(g.x(), g.y(), max(1, self.width()), max(1, self.height()))
-        x0 = int(round(r.x0))
-        y0 = int(round(H - r.y1))
-        w = max(1, int(round(r.width)))
-        h = max(1, int(round(r.height)))
-        tl = self.mapToGlobal(QPoint(x0, y0))
-        return QRect(tl.x(), tl.y(), w, h)
+        if self._patch_sol:
+            self._patch_sol.remove()
+        if self._ligne_sol:
+            self._ligne_sol.remove()
 
-    def contact_point_global(self, hit_c):
-        """Centre du joint (contact) en coordonnées globales écran."""
-        return self._data_to_global(hit_c["cx"], hit_c["y_if"])
-
-    def refine_contact_tooltip_position(self, tip):
-        """Recadre l’infobulle dans le plan de dessin (utile après resize / refresh)."""
-        tip.set_plot_bounds_global(self.axes_global_rect())
-        tip.clamp_to_bounds()
-
-    # ── Sol ──────────────────────────────────
-    def _draw_ground(self):
-        xmin, xmax = self.axes.get_xlim()
-        if self._ground_patch:
-            self._ground_patch.remove()
-        if self._ground_line:
-            self._ground_line.remove()
-        self._ground_patch = Rectangle(
+        self._patch_sol = Rectangle(
             (xmin, GROUND_Y - 0.5), xmax - xmin, 0.5,
             facecolor="#e8f5e9", edgecolor="#388e3c",
             linewidth=2, hatch="////", zorder=0
         )
-        self.axes.add_patch(self._ground_patch)
-        self._ground_line, = self.axes.plot(
+        self.axes.add_patch(self._patch_sol)
+
+        # Ligne épaisse marquant la surface du sol
+        self._ligne_sol, = self.axes.plot(
             [xmin, xmax], [GROUND_Y, GROUND_Y],
             color="#388e3c", linewidth=2.5, zorder=1
         )
 
-    # ── Gravité ──────────────────────────────
-    def set_gravity(self, enabled):
-        self.gravity_on = enabled
-        if enabled:
-            self._timer.start()
+    # ── Gravité ──────────────────────────────────────────────
+
+    def activer_gravite(self, active):
+        """Active ou désactive la simulation de chute libre."""
+        self.gravite_active = active
+        if active:
+            self._timer_physique.start()
         else:
-            self._timer.stop()
+            self._timer_physique.stop()
 
-    def set_heatmap(self, enabled):
-        """True : grille bleu-plasma par pression (Pa) sur chaque bloc. False : matériau."""
-        self.heatmap_on = bool(enabled)
-
-    def matrice_heatmap_bloc(self, index):
+    def _tick_physique(self):
         """
-        Accès explicite à la grille pression du bloc ``index``.
-
-        Retourne ``(M, (nx, ny))`` : ``M`` est un ``numpy.ndarray`` de Pa, forme ``(ny, nx)``
-        (ligne 0 = bas du bloc). Si la heatmap est off ou l’indice invalide : ``(None, None)``.
-
-        Équivalent : ``canvas.rects[index]["heatmap_matrice"]`` et ``heatmap_cellules``.
+        Appelé ~33 fois par seconde quand la gravité est active.
+        Fait descendre chaque bloc vers son plancher naturel
+        (sol ou dessus du bloc le plus proche en dessous).
         """
-        if not (0 <= index < len(self.rects)):
-            return None, None
-        rd = self.rects[index]
-        return rd.get("heatmap_matrice"), rd.get("heatmap_cellules")
-
-    def _physics_tick(self):
-        """Descend chaque bloc d’un pas vers le premier appui (sol ou sommet d’un bloc en dessous)."""
-        if not self.rects:
+        if not self.blocs:
             return
-        moved = False
-        order = sorted(
-            range(len(self.rects)),
-            key=lambda i: self.rects[i]["patch"].get_xy()[1],
+
+        a_bouge = False
+
+        # On traite les blocs du bas vers le haut pour éviter les conflits
+        ordre = sorted(
+            range(len(self.blocs)),
+            key=lambda i: self.blocs[i]["patch"].get_xy()[1]
         )
-        for idx in order:
-            if idx == self._drag_index:
-                continue
-            patch = self.rects[idx]["patch"]
-            x, y = patch.get_xy()
-            floor_y = _hauteur_appui_max(self.rects, idx)
 
-            if y > floor_y + 0.001:
-                new_y = max(floor_y, y - FALL_STEP)
-                patch.set_xy((x, new_y))
-                moved = True
+        for idx in ordre:
+            if idx == self._idx_drag:
+                continue  # le bloc qu'on tient en main ne tombe pas
 
-        if moved:
-            # À chaque tick : physique + draw_stress pour coller heatmap / overlays
-            # aux patches (évite traînée si on throttlait le redraw).
+            patch = self.blocs[idx]["patch"]
+            x, y  = patch.get_xy()
+
+            # Cherche le plancher effectif : sol ou sommet d'un bloc en dessous
+            plancher = GROUND_Y
+            for i2, autre in enumerate(self.blocs):
+                if i2 == idx:
+                    continue
+                x2, y2 = autre["patch"].get_xy()
+                w2, h2 = autre["patch"].get_width(), autre["patch"].get_height()
+                x_moi  = patch.get_xy()[0]
+                w_moi  = patch.get_width()
+
+                # Ne compte que les blocs qui chevauchent horizontalement
+                if x_moi < x2 + w2 and x2 < x_moi + w_moi:
+                    sommet_autre = y2 + h2
+                    if sommet_autre <= y + 0.001:  # l'autre est bien en dessous
+                        plancher = max(plancher, sommet_autre)
+
+            # Si le bloc est encore au-dessus de son plancher, il descend
+            if y > plancher + 0.001:
+                nouvelle_y = max(plancher, y - FALL_STEP)
+                patch.set_xy((x, nouvelle_y))
+                a_bouge = True
+
+        if a_bouge:
             self.draw_idle()
-            self._notify(refresh_list=False)
+            self._notifier()
 
-    # ── Blocs ────────────────────────────────
-    def add_rectangle(self, w, h, material="Acier", density=None):
-        mp = MATERIALS.get(material, MATERIALS["Acier"])
-        if density is None:
-            density = mp["density"]
-        fc, ec = mp["face"], mp["edge"]
-        # Spawn en haut au centre si gravité active, sinon au-dessus de la pile
-        if self.gravity_on:
-            y_start = 9.0
-            x_start = 1.0
+    # ── Gestion des blocs ────────────────────────────────────
+
+    def ajouter_bloc(self, largeur, hauteur, materiau="Acier", densite=7850):
+        """
+        Crée un nouveau bloc rectangulaire et l'ajoute au canvas.
+        Si la gravité est active, il apparaît en haut et tombe.
+        Sinon, il se pose directement au-dessus de la pile.
+        """
+        if self.gravite_active:
+            y_depart = 9.0
+            x_depart = 1.0
         else:
-            y_start = GROUND_Y
-            if self.rects:
-                tops = [r["patch"].get_xy()[1] + r["patch"].get_height()
-                        for r in self.rects]
-                y_start = max(tops)
-            x_start = 0.5
+            y_depart = GROUND_Y
+            if self.blocs:
+                sommets  = [b["patch"].get_xy()[1] + b["patch"].get_height() for b in self.blocs]
+                y_depart = max(sommets)
+            x_depart = 0.5
+
         patch = Rectangle(
-            (x_start, y_start), w, h,
-            facecolor=fc, edgecolor=ec,
+            (x_depart, y_depart), largeur, hauteur,
+            facecolor="#bbdefb", edgecolor="#1565c0",
             linewidth=1.8, zorder=5, alpha=0.9
         )
         self.axes.add_patch(patch)
-        self.rects.append({
-            "patch":     patch,
-            "material":  material,
-            "density":   density,
-            "edgecolor": ec,
-            "ext_force": 0.0,
-            "moment":    0.0,
-            "pressure":  0.0,
-            "heatmap_matrice":   None,
-            "heatmap_cellules":  None,
+
+        self.blocs.append({
+            "patch":      patch,
+            "material":   materiau,
+            "density":    densite,
+            "ext_force":  0.0,   # force ponctuelle appliquée (N)
+            "moment":     0.0,   # moment fléchissant (N·m)
+            "pressure":   0.0,   # pression distribuée (Pa)
         })
-        self._notify()
+        self._notifier()
 
-    def remove_rectangle(self, index):
-        if 0 <= index < len(self.rects):
-            self.rects[index]["patch"].remove()
-            self.rects.pop(index)
-            self._notify()
+    def supprimer_bloc(self, index):
+        """Supprime le bloc à l'index donné du canvas et de la liste."""
+        if 0 <= index < len(self.blocs):
+            self.blocs[index]["patch"].remove()
+            self.blocs.pop(index)
+            self._notifier()
 
-    # ── Drag ─────────────────────────────────
-    def _hit_test_contact(self, event):
-        if event.xdata is None or event.ydata is None:
-            return None
-        xd, yd = event.xdata, event.ydata
-        for z in reversed(self._contact_hit_zones):
-            if (z["x0"] <= xd <= z["x1"] and z["y0"] <= yd <= z["y1"]):
-                return {
-                    "i_bot": z["i_bot"],
-                    "i_top": z["i_top"],
-                    "frac":  z["frac"],
-                    "F_c":   z["F_c"],
-                    "cx":    z["cx"],
-                    "y_if":  z["y_if"],
-                }
-        return None
+    # ── Drag & drop ──────────────────────────────────────────
 
-    def _hit_test(self, event):
-        if event.xdata is None or event.ydata is None:
-            return None
-        xd, yd = event.xdata, event.ydata
-        for idx in range(len(self.rects) - 1, -1, -1):
-            x, y, w, h = _geom_patch(self.rects[idx])
-            if x <= xd <= x + w and y <= yd <= y + h:
+    def _tester_clic(self, event):
+        """
+        Retourne l'index du bloc cliqué, en partant du dessus (dernier ajouté).
+        Retourne None si le clic est dans le vide.
+        """
+        for i, bloc in enumerate(reversed(self.blocs)):
+            idx  = len(self.blocs) - 1 - i
+            xy   = bloc["patch"].get_xy()
+            w, h = bloc["patch"].get_width(), bloc["patch"].get_height()
+
+            dans_le_bloc = (
+                event.xdata is not None and event.ydata is not None and
+                xy[0] <= event.xdata <= xy[0] + w and
+                xy[1] <= event.ydata <= xy[1] + h
+            )
+            if dans_le_bloc:
                 return idx
         return None
 
-    def _on_press(self, event):
+    def _souris_appui(self, event):
         if event.inaxes != self.axes or event.button != 1:
             return
-        hit_c = self._hit_test_contact(event)
-        if hit_c is not None and self._on_contact_clicked:
-            pg = self._mpl_press_to_global(event)
-            if pg is not None:
-                hit_c["_press_global"] = pg
-            self._on_contact_clicked(hit_c)
-            return
-        idx = self._hit_test(event)
+        idx = self._tester_clic(event)
         if idx is not None:
-            self._drag_index = idx
-            xy = self.rects[idx]["patch"].get_xy()
-            self._drag_offset = (event.xdata - xy[0], event.ydata - xy[1])
+            self._idx_drag    = idx
+            xy                = self.blocs[idx]["patch"].get_xy()
+            # On mémorise où dans le bloc on a cliqué pour un drag naturel
+            self._offset_drag = (event.xdata - xy[0], event.ydata - xy[1])
 
-    def _on_motion(self, event):
-        if self._drag_index is None or event.inaxes != self.axes:
+    def _souris_mouvement(self, event):
+        if self._idx_drag is None or event.inaxes != self.axes:
             return
         if event.xdata is None or event.ydata is None:
             return
-        rd = self.rects[self._drag_index]
-        patch = rd["patch"]
+
+        patch    = self.blocs[self._idx_drag]["patch"]
         xmin, xmax = self.axes.get_xlim()
-        _, ymax_ax = self.axes.get_ylim()
-        w, h = patch.get_width(), patch.get_height()
-        x = max(xmin,     min(
-            xmax - w,     event.xdata - self._drag_offset[0]))
-        y = max(GROUND_Y, min(ymax_ax - h,
-                event.ydata - self._drag_offset[1]))
+        _, ymax    = self.axes.get_ylim()
+        w, h       = patch.get_width(), patch.get_height()
+
+        # Limite le déplacement aux bords du canvas
+        x = max(xmin,     min(xmax - w, event.xdata - self._offset_drag[0]))
+        y = max(GROUND_Y, min(ymax - h, event.ydata - self._offset_drag[1]))
         patch.set_xy((x, y))
 
-        _resolve_collision(self._drag_index, self.rects)
+        # Empêche la traversée d'autres blocs en temps réel
+        _resoudre_collision(self._idx_drag, self.blocs)
 
         self.draw_idle()
+        self._notifier()
 
-    def _on_release(self, event):
-        self._drag_index = None
-        self._drag_offset = None
-        self._notify()
+    def _souris_relache(self, event):
+        self._idx_drag    = None
+        self._offset_drag = None
 
-    def _notify(self, refresh_list=True):
-        if self._on_rects_changed:
-            self._on_rects_changed(refresh_list=refresh_list)
+    def _notifier(self):
+        """Informe l'application principale qu'un bloc a bougé ou changé."""
+        if self._on_blocs_changes:
+            self._on_blocs_changes()
 
-    # ── Dessin stress + contacts ──────────────
-    def draw_stress(self, stress_data, contact_pairs):
-        _vider_serie_artists(self._heatmap_aximages)
-        _vider_serie_artists(self._stress_patches)
-        _vider_serie_artists(self._arrow_artists)
-        if self._cg_artist:
-            _vider_serie_artists(self._cg_artist)
-            self._cg_artist = None
+    # ── Rendu visuel des contraintes ─────────────────────────
 
-        self._contact_hit_zones.clear()
+    def dessiner_contraintes(self, donnees_stress, paires_contact):
+        """
+        Redessine toute la couche de visualisation physique :
+        - heatmap colorée sur chaque bloc (vert = OK, rouge = danger)
+        - flèches de forces et de pression
+        - flèches d'interaction aux interfaces de contact
+        - centre de gravité global (boule jaune)
+        """
+        # Nettoyage de l'ancien rendu
+        for p in self._patches_stress:
+            try: p.remove()
+            except Exception: pass
+        self._patches_stress.clear()
 
-        if not self.rects or not stress_data:
-            for rd in self.rects:
-                rd["heatmap_matrice"] = None
-                rd["heatmap_cellules"] = None
-            self._lock_fixed_view()
+        for a in self._artistes_fleches:
+            try: a.remove()
+            except Exception: pass
+        self._artistes_fleches.clear()
+
+        if self._artiste_cg:
+            for a in self._artiste_cg:
+                try: a.remove()
+                except Exception: pass
+            self._artiste_cg = None
+
+        if not self.blocs or not donnees_stress:
             self.draw_idle()
             return
 
-        for rd in self.rects:
-            rd["heatmap_matrice"] = None
-            rd["heatmap_cellules"] = None
+        # Normalisation de la colormap sur la contrainte max observée
+        toutes_sigmas    = [abs(d["sigma_total"]) for d in donnees_stress if d]
+        sigma_max_global = max(toutes_sigmas) if any(s > 0 for s in toutes_sigmas) else 1.0
+        colormap         = cm.get_cmap("RdYlGn_r")
+        normaliseur      = mcolors.Normalize(vmin=0, vmax=sigma_max_global)
 
-        p_list = [float(rd["pressure"]) for rd in self.rects]
-        p_max = max(p_list) if p_list else 0.0
-        if self.heatmap_on:
-            pressure_norm = mcolors.Normalize(vmin=0.0, vmax=max(p_max, 1.0))
-            cmap_p = _blue_plasma_cmap()
-        else:
-            pressure_norm = cmap_p = None
-
-        for i, (rd, sd) in enumerate(zip(self.rects, stress_data)):
-            if sd is None:
+        # ── Dessin de chaque bloc ──
+        for bloc, stress in zip(self.blocs, donnees_stress):
+            if stress is None:
                 continue
-            x, y, w, h = _geom_patch(rd)
 
-            mat = rd["material"]
-            fc = MATERIALS.get(mat, MATERIALS["Acier"])["face"]
-            p_pa = float(rd["pressure"])
+            patch    = bloc["patch"]
+            x, y     = patch.get_xy()
+            w, h     = patch.get_width(), patch.get_height()
 
-            if self.heatmap_on and pressure_norm is not None:
-                nx = max(2, min(HEATMAP_CELLES_MAX, int(w * 10)))
-                ny = max(2, min(HEATMAP_CELLES_MAX, int(h * 10)))
-                pa = _pressure_grid_pa(p_pa, nx, ny)
-                rd["heatmap_matrice"] = pa
-                rd["heatmap_cellules"] = (nx, ny)
-                rgba = _pressure_grid_rgba_from_pa(pa, pressure_norm, cmap_p)
-                im = self.axes.imshow(
-                    rgba,
-                    extent=(x, x + w, y, y + h),
-                    origin="lower",
-                    aspect="auto",
-                    interpolation="nearest",
-                    zorder=6,
-                    clip_on=True,
-                )
-                im.set_alpha(0.93)
-                self._heatmap_aximages.append(im)
-            elif abs(sd.get("sigma_bending_top", 0)) > 1:
-                for dy in (0, h / 2):
-                    r = Rectangle(
-                        (x, y + dy), w, h / 2,
-                        facecolor=fc, edgecolor="none", alpha=0.96, zorder=6)
-                    self.axes.add_patch(r)
-                    self._stress_patches.append(r)
+            # Si flexion active : dégradé haut/bas (fibre tendue vs comprimée)
+            if abs(stress.get("sigma_bending_top", 0)) > 1:
+                for decalage, sigma in [(0, stress["sigma_bending_bot"]),
+                                        (h/2, stress["sigma_bending_top"])]:
+                    couleur = colormap(normaliseur(abs(sigma)))
+                    rect    = Rectangle((x, y + decalage), w, h/2,
+                                        facecolor=couleur, edgecolor="none",
+                                        alpha=0.55, zorder=6)
+                    self.axes.add_patch(rect)
+                    self._patches_stress.append(rect)
             else:
-                r = Rectangle(
-                    (x, y), w, h,
-                    facecolor=fc, edgecolor="none", alpha=0.96, zorder=6)
-                self.axes.add_patch(r)
-                self._stress_patches.append(r)
+                # Couleur uniforme selon la contrainte totale
+                couleur = colormap(normaliseur(abs(stress["sigma_total"])))
+                rect    = Rectangle((x, y), w, h,
+                                    facecolor=couleur, edgecolor="none",
+                                    alpha=0.55, zorder=6)
+                self.axes.add_patch(rect)
+                self._patches_stress.append(rect)
 
-            ec = rd.get("edgecolor") or MATERIALS.get(
-                rd["material"], MATERIALS["Acier"])["edge"]
-            border = Rectangle((x, y), w, h,
-                               facecolor="none", edgecolor=ec,
-                               linewidth=1.5, zorder=7)
-            self.axes.add_patch(border)
-            self._stress_patches.append(border)
+            # Contour du bloc
+            contour = Rectangle((x, y), w, h,
+                                 facecolor="none", edgecolor="#1565c0",
+                                 linewidth=1.5, zorder=7)
+            self.axes.add_patch(contour)
+            self._patches_stress.append(contour)
 
-            # Assombrissement au contact avec le sol
-            if abs(y - GROUND_Y) < SNAP_TOL * 2.0:
-                sh = min(0.09, max(0.04, h * 0.22))
-                sol_sh = Rectangle(
-                    (x, y), w, sh,
-                    facecolor="#000000", edgecolor="none", alpha=0.34,
-                    zorder=8)
-                self.axes.add_patch(sol_sh)
-                self._stress_patches.append(sol_sh)
+            # Étiquette : valeur de σ et taux d'utilisation
+            util    = stress["utilization"]
+            symbole = "✓" if util < 80 else ("!" if util < 100 else "✗")
+            label   = self.axes.text(
+                x + w/2, y + h/2,
+                f"σ = {stress['sigma_total']/1e6:.2f} MPa\n{util:.0f}% {symbole}",
+                ha="center", va="center", fontsize=7.5,
+                color="black", fontweight="bold", zorder=10,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
+                          alpha=0.65, edgecolor="none")
+            )
+            self._patches_stress.append(label)
 
-            if abs(sd.get("ext_force", 0)) > 0:
-                cx = x + w/2
-                arr = FancyArrowPatch(
+            # Flèche pour force ponctuelle
+            if abs(stress.get("ext_force", 0)) > 0:
+                cx     = x + w/2
+                fleche = FancyArrowPatch(
                     (cx, y + h + 0.7), (cx, y + h + 0.05),
                     arrowstyle="-|>", mutation_scale=16,
                     color="#d32f2f", linewidth=2.5, zorder=11
                 )
-                self.axes.add_patch(arr)
-                self._arrow_artists.append(arr)
-                lbl = self.axes.text(
-                    cx, y + h + 0.8, f"F={sd['ext_force']:.0f} N",
+                self.axes.add_patch(fleche)
+                self._artistes_fleches.append(fleche)
+
+                lbl_force = self.axes.text(
+                    cx, y + h + 0.8, f"F = {stress['ext_force']:.0f} N",
                     ha="center", va="bottom", fontsize=7.5,
                     color="#d32f2f", fontweight="bold", zorder=11
                 )
-                self._arrow_artists.append(lbl)
+                self._artistes_fleches.append(lbl_force)
 
-            if abs(sd.get("pressure", 0)) > 0:
-                n = max(3, int(w * 2))
-                for k in range(n):
-                    ax_x = x + (k + 0.5) * w / n
-                    arr = FancyArrowPatch(
-                        (ax_x, y + h + 0.35), (ax_x, y + h + 0.02),
+            # Petites flèches pour pression distribuée
+            if abs(stress.get("pressure", 0)) > 0:
+                nb_fleches = max(3, int(w * 2))
+                for k in range(nb_fleches):
+                    x_fleche = x + (k + 0.5) * w / nb_fleches
+                    f = FancyArrowPatch(
+                        (x_fleche, y + h + 0.35), (x_fleche, y + h + 0.02),
                         arrowstyle="-|>", mutation_scale=9,
                         color="#e65100", linewidth=1.2, zorder=11
                     )
-                    self.axes.add_patch(arr)
-                    self._arrow_artists.append(arr)
+                    self.axes.add_patch(f)
+                    self._artistes_fleches.append(f)
 
-        def _y_interface(pair):
-            i_bot, _, _ = pair
-            _, yb, _, hb = _geom_patch(self.rects[i_bot])
-            return yb + hb
+        # ── Interactions de contact entre blocs ──
+        for (i_bas, i_haut, fraction) in paires_contact:
+            bloc_bas  = self.blocs[i_bas]
+            bloc_haut = self.blocs[i_haut]
 
-        sorted_pairs = sorted(contact_pairs, key=_y_interface)
+            xb, yb = bloc_bas["patch"].get_xy()
+            wb, hb = bloc_bas["patch"].get_width(), bloc_bas["patch"].get_height()
+            xh, _  = bloc_haut["patch"].get_xy()
+            wh     = bloc_haut["patch"].get_width()
 
-        for (i_bot, i_top, frac) in sorted_pairs:
-            rd_b = self.rects[i_bot]
-            rd_t = self.rects[i_top]
-            xb, yb, wb, hb = _geom_patch(rd_b)
-            xt, yt, wt, ht = _geom_patch(rd_t)
-            y_if = yb + hb
+            y_interface = yb + hb  # la ligne de contact
 
-            x_l = max(xb, xt)
-            x_r = min(xb + wb, xt + wt)
-            if x_r <= x_l:
-                continue
-
-            shade_d = min(0.08, hb * 0.38, ht * 0.38)
-            y_bot0 = max(yb, y_if - shade_d)
-            h_bot = y_if - y_bot0
-            if h_bot > 1e-4:
-                sb = Rectangle(
-                    (x_l, y_bot0), x_r - x_l, h_bot,
-                    facecolor="#000000", edgecolor="none", alpha=0.36,
-                    zorder=9)
-                self.axes.add_patch(sb)
-                self._stress_patches.append(sb)
-            y_top1 = min(yt + ht, y_if + shade_d)
-            h_top = y_top1 - y_if
-            if h_top > 1e-4:
-                st = Rectangle(
-                    (x_l, y_if), x_r - x_l, h_top,
-                    facecolor="#000000", edgecolor="none", alpha=0.36,
-                    zorder=9)
-                self.axes.add_patch(st)
-                self._stress_patches.append(st)
-
-            cr = Rectangle(
-                (x_l, y_if - 0.05), x_r - x_l, 0.10,
-                facecolor="#1a1a1a", edgecolor="none", alpha=0.88, zorder=12
+            # Zone de contact surlignée en orange
+            x_gauche = max(xb, xh)
+            x_droite = min(xb + wb, xh + wh)
+            zone_contact = Rectangle(
+                (x_gauche, y_interface - 0.05), x_droite - x_gauche, 0.10,
+                facecolor="#ff6f00", edgecolor="none", alpha=0.9, zorder=12
             )
-            self.axes.add_patch(cr)
-            self._stress_patches.append(cr)
+            self.axes.add_patch(zone_contact)
+            self._patches_stress.append(zone_contact)
 
-            sd_top = (
-                stress_data[i_top] if i_top < len(stress_data) else None)
-            F_c = float(sd_top["F_axial"]) if sd_top else 0.0
-            cx = (x_l + x_r) / 2
+            # Force transmise à l'interface
+            F_contact = donnees_stress[i_haut]["F_axial"]
+            cx        = (x_gauche + x_droite) / 2
 
-            pad_x, pad_y = 0.04, 0.05
-            self._contact_hit_zones.append({
-                "x0": x_l - pad_x,
-                "x1": x_r + pad_x,
-                "y0": y_if - 0.05 - pad_y,
-                "y1": y_if + 0.05 + pad_y,
-                "i_bot": i_bot,
-                "i_top": i_top,
-                "frac":  frac,
-                "F_c":   F_c,
-                "cx":    cx,
-                "y_if":  y_if,
-            })
-
-            arr_d = FancyArrowPatch(
-                (cx - 0.12, y_if + 0.55), (cx - 0.12, y_if + 0.06),
+            # Flèche rouge ↓ : le bloc du haut comprime le bas
+            fleche_bas = FancyArrowPatch(
+                (cx - 0.12, y_interface + 0.55), (cx - 0.12, y_interface + 0.06),
                 arrowstyle="-|>", mutation_scale=18,
                 color="#d32f2f", linewidth=2.5, zorder=13
             )
-            self.axes.add_patch(arr_d)
-            self._arrow_artists.append(arr_d)
+            self.axes.add_patch(fleche_bas)
+            self._artistes_fleches.append(fleche_bas)
 
-            arr_u = FancyArrowPatch(
-                (cx + 0.12, y_if - 0.55), (cx + 0.12, y_if - 0.06),
+            # Flèche bleue ↑ : réaction du bas (3e loi de Newton)
+            fleche_haut = FancyArrowPatch(
+                (cx + 0.12, y_interface - 0.55), (cx + 0.12, y_interface - 0.06),
                 arrowstyle="-|>", mutation_scale=18,
                 color="#1565c0", linewidth=2.5, zorder=13
             )
-            self.axes.add_patch(arr_u)
-            self._arrow_artists.append(arr_u)
+            self.axes.add_patch(fleche_haut)
+            self._artistes_fleches.append(fleche_haut)
 
-        total_area, xg, yg, _, _, _ = _statistiques_globales_section(self.rects)
-        if total_area > 0:
-            hl = self.axes.axhline(yg, color="#f9a825",
-                                   lw=0.9, ls="--", zorder=15, alpha=0.6)
-            vl = self.axes.axvline(xg, color="#f9a825",
-                                   lw=0.9, ls="--", zorder=15, alpha=0.6)
+            # Étiquette de la force de contact
+            lbl_contact = self.axes.text(
+                cx + 0.3, y_interface,
+                f"Fc = {F_contact:.0f} N\n({fraction*100:.0f}% contact)",
+                ha="left", va="center", fontsize=7,
+                color="#bf360c", fontweight="bold", zorder=14,
+                bbox=dict(boxstyle="round,pad=0.25",
+                          facecolor="#fff3e0", alpha=0.92, edgecolor="#ff6f00")
+            )
+            self._artistes_fleches.append(lbl_contact)
 
-            dot, = self.axes.plot(xg, yg, "o", color="#f9a825", markersize=13,
-                                  zorder=16, markeredgecolor="#e65100", markeredgewidth=2)
-            self._cg_artist = [dot, hl, vl]
+            # Surlignes orange sur les deux blocs impliqués
+            for b in (bloc_bas, bloc_haut):
+                px, py = b["patch"].get_xy()
+                pw, ph = b["patch"].get_width(), b["patch"].get_height()
+                surligne = Rectangle((px, py), pw, ph,
+                                     facecolor="none", edgecolor="#ff6f00",
+                                     linewidth=3, linestyle="--", zorder=8)
+                self.axes.add_patch(surligne)
+                self._patches_stress.append(surligne)
 
-        self._lock_fixed_view()
+        # ── Centre de gravité (boule jaune) ──
+        aire_totale = sum(b["patch"].get_width() * b["patch"].get_height() for b in self.blocs)
+        if aire_totale > 0:
+            xg = sum(
+                (b["patch"].get_xy()[0] + b["patch"].get_width()/2) *
+                b["patch"].get_width() * b["patch"].get_height()
+                for b in self.blocs
+            ) / aire_totale
+
+            yg = sum(
+                (b["patch"].get_xy()[1] + b["patch"].get_height()/2) *
+                b["patch"].get_width() * b["patch"].get_height()
+                for b in self.blocs
+            ) / aire_totale
+
+            # Axes d'inertie en pointillé jaune
+            ligne_h = self.axes.axhline(yg, color="#f9a825", lw=0.9,
+                                        ls="--", zorder=15, alpha=0.6)
+            ligne_v = self.axes.axvline(xg, color="#f9a825", lw=0.9,
+                                        ls="--", zorder=15, alpha=0.6)
+
+            # Boule jaune au centre de gravité
+            point_cg, = self.axes.plot(
+                xg, yg, "o", color="#f9a825", markersize=13,
+                zorder=16, markeredgecolor="#e65100", markeredgewidth=2
+            )
+
+            # Étiquette du centre de gravité
+            texte_cg = self.axes.text(
+                xg + 0.18, yg + 0.18,
+                f"⊕ Centre de\n   Gravité\n   ({xg:.2f}, {yg:.2f})",
+                color="#e65100", fontsize=7.5, fontweight="bold", zorder=17,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff9c4",
+                          alpha=0.92, edgecolor="#f9a825")
+            )
+            self._artiste_cg = [point_cg, ligne_h, ligne_v, texte_cg]
+
         self.draw_idle()
 
 
-def _block_list_row(panel, index: int, text: str) -> QWidget:
-    """Une ligne : libellé + × qui supprime l’entrée « index »."""
-    w = QWidget()
-    h = QHBoxLayout(w)
-    h.setContentsMargins(2, 2, 2, 2)
-    lbl = QLabel(text)
-    lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-    btn = QPushButton("×")
-    btn.setFixedSize(22, 22)
-    btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-    btn.setToolTip("Supprimer ce bloc")
-    btn.clicked.connect(functools.partial(panel._on_remove_at, index))
-    h.addWidget(lbl, stretch=1)
-    h.addWidget(btn)
+# ──────────────────────────────────────────────────────────────
+#  Panneau de contrôle  —  interface utilisateur droite
+# ──────────────────────────────────────────────────────────────
 
-    def _press(event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            panel.list_widget.setCurrentRow(index)
-        QWidget.mousePressEvent(w, event)
+class PanneauControle(QFrame):
+    """
+    Panneau latéral avec :
+    - bouton switch vers le mode 3D
+    - activation de la gravité
+    - ajout/suppression de blocs
+    - application de charges
+    - affichage des résultats physiques
+    """
 
-    w.mousePressEvent = _press
-    return w
-
-
-PANEL_QSS = """
-    QFrame        { background: #f5f5f5; }
-    QGroupBox     { color:#1565c0; border:1px solid #bbdefb; margin-top:8px;
-                    padding-top:6px; border-radius:4px; font-weight:bold; }
-    QGroupBox::title { subcontrol-origin:margin; left:8px; }
-    QLabel        { color:#333; }
-    QDoubleSpinBox{ background:white; color:#222; border:1px solid #90caf9;
-                    border-radius:3px; padding:2px; }
-    QPushButton   { background:#1565c0; color:white; border:none;
-                    border-radius:4px; padding:7px; font-weight:bold; }
-    QPushButton:hover { background:#1976d2; }
-    QListWidget   { background:white; color:#222; border:1px solid #bbdefb; }
-    QComboBox     { background:white; color:#222; border:1px solid #90caf9;
-                    border-radius:3px; padding:2px; }
-    QTabWidget::pane { border:1px solid #bbdefb; background:white; }
-    QTabBar::tab  { background:#e3f2fd; color:#555; padding:6px 14px; }
-    QTabBar::tab:selected { background:white; color:#1565c0; font-weight:bold; }
-    QScrollArea   { border:none; }
-    QCheckBox     { color:#1565c0; spacing: 6px; }
-    QCheckBox::indicator {
-        width: 18px;
-        height: 18px;
+    # Propriétés physiques des matériaux disponibles
+    MATERIAUX = {
+        "Acier":     {"density": 7850, "E": 210e9, "sigma_y": 250e6},
+        "Béton":     {"density": 2400, "E":  30e9, "sigma_y":  30e6},
+        "Aluminium": {"density": 2700, "E":  70e9, "sigma_y": 270e6},
+        "Bois":      {"density":  600, "E":  12e9, "sigma_y":  40e6},
+        "Fonte":     {"density": 7200, "E": 170e9, "sigma_y": 200e6},
     }
-    QCheckBox::indicator:unchecked {
-        background: white;
-        border: 2px solid #90caf9;
-        border-radius: 3px;
-    }
-    QCheckBox::indicator:checked {
-        background: #1565c0;
-        border: 2px solid #1565c0;
-        border-radius: 3px;
-    }
-"""
 
-
-# ─────────────────────────────────────────────
-#  Panneau de contrôle
-# ─────────────────────────────────────────────
-class ControlPanel(QFrame):
-    MATERIALS = MATERIALS
-
-    def __init__(self, canvas, physics_callback, parent=None):
+    def __init__(self, canvas, callback_physique, parent=None):
         super().__init__(parent)
-        self.canvas = canvas
-        self.physics_callback = physics_callback
-        self._selected_rect = None
-        self._contact_sel = None
-        self._setup_ui()
+        self.canvas            = canvas
+        self.callback_physique = callback_physique
+        self._bloc_selectionne = None
+        self._construire_ui()
 
-    def _setup_ui(self):
+    def _construire_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # ── Gravité toggle ───────────────────
-        grp_grav = QGroupBox("Simulation physique")
-        lay_grav = QVBoxLayout(grp_grav)
-        self.chk_gravity = QCheckBox("Gravité")
-        self.chk_gravity.setStyleSheet("font-weight:bold; font-size:11px;")
-        self.chk_gravity.toggled.connect(self._on_gravity_toggle)
-        lay_grav.addWidget(self.chk_gravity)
-
-        self.chk_heatmap = QCheckBox("Heatmap pression")
-        self.chk_heatmap.setStyleSheet("font-weight:bold; font-size:11px;")
-        self.chk_heatmap.setToolTip(
-            "Grille bleu-plasma sur chaque bloc (visible même à 0 Pa, bleu par défaut). "
-            "Couleurs selon la pression distribuée (Pa) du bloc — visuel uniquement.")
-        self.chk_heatmap.toggled.connect(self._on_heatmap_toggle)
-        lay_grav.addWidget(self.chk_heatmap)
-
-        grp_grav.setLayout(lay_grav)
-        layout.addWidget(grp_grav)
-
-        self._contact_tooltip = None
-
-        lbl_hint = QLabel(
-            "<span style='color:#888;font-size:8px'>"
-            "Cliquez sur une surface de contact pour afficher les détails.</span>"
+        # Bouton pour basculer en mode 3D
+        # Le signal clicked sera branché par MaterialSimulationApp
+        self.btn_switch_3d = QPushButton("🧊  Passer en mode 3D")
+        self.btn_switch_3d.setStyleSheet(
+            "background-color: #ef6c00; color: white; font-size: 12px; padding: 8px;"
         )
-        lbl_hint.setWordWrap(True)
-        layout.addWidget(lbl_hint)
+        layout.addWidget(self.btn_switch_3d)
 
-        tabs = QTabWidget()
+        # ── Gravité ──
+        grp_gravite = QGroupBox("Simulation physique")
+        lay_grav    = QVBoxLayout(grp_gravite)
 
-        # ── Blocs ────────────────────────────
-        tab_b = QWidget()
-        lay_b = QVBoxLayout(tab_b)
+        self.chk_gravite = QCheckBox("🌍  Activer la gravité")
+        self.chk_gravite.setStyleSheet("font-weight: bold; font-size: 11px;")
+        self.chk_gravite.toggled.connect(self._toggle_gravite)
+        lay_grav.addWidget(self.chk_gravite)
 
-        grp1 = QGroupBox("Nouveau bloc")
-        form1 = QFormLayout()
-        self.spin_w = QDoubleSpinBox()
-        self.spin_w.setRange(0.1, 20)
-        self.spin_w.setValue(2)
-        self.spin_w.setSingleStep(0.25)
-        self.spin_h = QDoubleSpinBox()
-        self.spin_h.setRange(0.1, 20)
-        self.spin_h.setValue(1)
-        self.spin_h.setSingleStep(0.25)
-        self.combo_mat = QComboBox()
-        for m in self.MATERIALS:
-            self.combo_mat.addItem(m)
-        form1.addRow("Largeur (m):", self.spin_w)
-        form1.addRow("Hauteur (m):", self.spin_h)
-        form1.addRow("Matériau:",    self.combo_mat)
-        grp1.setLayout(form1)
-        lay_b.addWidget(grp1)
+        info_gravite = QLabel(
+            "Quand activée : les nouveaux blocs\n"
+            "tombent et s'empilent sur les autres.\n"
+            "Les blocs ne peuvent pas se traverser."
+        )
+        info_gravite.setStyleSheet("color: #555; font-size: 8px;")
+        lay_grav.addWidget(info_gravite)
 
-        btn_add = QPushButton("➕  Ajouter bloc")
-        btn_add.clicked.connect(self._on_add)
-        lay_b.addWidget(btn_add)
+        grp_gravite.setLayout(lay_grav)
+        layout.addWidget(grp_gravite)
 
-        grp2 = QGroupBox("Blocs présents")
-        lay_b2 = QVBoxLayout(grp2)
-        self.list_widget = QListWidget()
-        self.list_widget.setMaximumHeight(180)
-        self.list_widget.currentRowChanged.connect(self._on_select)
-        lay_b2.addWidget(self.list_widget)
-        grp2.setLayout(lay_b2)
-        lay_b.addWidget(grp2)
-        lay_b.addStretch()
-        tabs.addTab(tab_b, "Blocs")
+        # ── Onglets Blocs / Charges ──
+        onglets = QTabWidget()
 
-        # ── Charges ──────────────────────────
-        tab_l = QWidget()
-        lay_l = QVBoxLayout(tab_l)
-        grp_l = QGroupBox("Charges — bloc sélectionné")
-        form_l = QFormLayout()
-        self.spin_force = QDoubleSpinBox()
-        self.spin_force.setRange(0, 1e7)
-        self.spin_force.setSuffix(" N")
-        self.spin_force.setSingleStep(100)
-        self.spin_pressure = QDoubleSpinBox()
-        self.spin_pressure.setRange(0, 1e6)
-        self.spin_pressure.setSuffix(" Pa")
-        self.spin_pressure.setSingleStep(500)
-        self.spin_moment = QDoubleSpinBox()
-        self.spin_moment.setRange(-1e6, 1e6)
-        self.spin_moment.setSuffix(" N·m")
-        self.spin_moment.setSingleStep(100)
-        form_l.addRow("Force ponctuelle:",  self.spin_force)
-        form_l.addRow("Pression dist.:",    self.spin_pressure)
-        form_l.addRow("Moment fléch.:",     self.spin_moment)
-        grp_l.setLayout(form_l)
-        lay_l.addWidget(grp_l)
-        btn_apply = QPushButton("✅  Appliquer charges")
-        btn_apply.clicked.connect(self._on_apply_loads)
-        lay_l.addWidget(btn_apply)
-        lay_l.addStretch()
-        tabs.addTab(tab_l, "Charges")
+        # Onglet "Blocs"
+        tab_blocs = QWidget()
+        lay_blocs = QVBoxLayout(tab_blocs)
 
-        # ── Résultats : CdG + détail physique & contacts (uniquement dans cet onglet)
-        tab_phys = QWidget()
-        lay_phys = QVBoxLayout(tab_phys)
-        lay_phys.setContentsMargins(4, 4, 4, 4)
-        lay_phys.setSpacing(8)
+        grp_nouveau = QGroupBox("Nouveau bloc")
+        form_nouveau = QFormLayout()
+        self.spin_largeur = QDoubleSpinBox()
+        self.spin_largeur.setRange(0.1, 20); self.spin_largeur.setValue(2); self.spin_largeur.setSingleStep(0.25)
+        self.spin_hauteur = QDoubleSpinBox()
+        self.spin_hauteur.setRange(0.1, 20); self.spin_hauteur.setValue(1); self.spin_hauteur.setSingleStep(0.25)
+        self.combo_materiau = QComboBox()
+        for nom in self.MATERIAUX:
+            self.combo_materiau.addItem(nom)
+        form_nouveau.addRow("Largeur (m):", self.spin_largeur)
+        form_nouveau.addRow("Hauteur (m):", self.spin_hauteur)
+        form_nouveau.addRow("Matériau:",    self.combo_materiau)
+        grp_nouveau.setLayout(form_nouveau)
+        lay_blocs.addWidget(grp_nouveau)
 
-        grp_cg = QGroupBox("Centre de gravité")
-        lay_cg = QVBoxLayout(grp_cg)
-        self.lbl_results = QLabel(
-            "<i style='color:#888'>Ajoutez des blocs pour afficher le CdG.</i>")
-        self.lbl_results.setWordWrap(True)
-        self.lbl_results.setTextFormat(Qt.TextFormat.RichText)
-        self.lbl_results.setStyleSheet(
-            "font-family: Consolas; font-size: 9px; color: #222;")
-        scroll_cg = QScrollArea()
-        scroll_cg.setWidget(self.lbl_results)
-        scroll_cg.setWidgetResizable(True)
-        scroll_cg.setMaximumHeight(140)
-        lay_cg.addWidget(scroll_cg)
-        grp_cg.setLayout(lay_cg)
-        lay_phys.addWidget(grp_cg)
+        btn_ajouter = QPushButton("➕  Ajouter bloc")
+        btn_ajouter.clicked.connect(self._ajouter_bloc)
+        lay_blocs.addWidget(btn_ajouter)
 
-        grp_detail = QGroupBox("Détail physique & contacts")
-        lay_detail = QVBoxLayout(grp_detail)
-        self.lbl_physics_report = QLabel(
-            "<i style='color:#888'>Ajoutez des blocs pour afficher le détail.</i>")
-        self.lbl_physics_report.setWordWrap(True)
-        self.lbl_physics_report.setTextFormat(Qt.TextFormat.RichText)
-        self.lbl_physics_report.setStyleSheet(
-            "font-family: Consolas; font-size: 9px; color: #222;")
-        scroll_phys = QScrollArea()
-        scroll_phys.setWidget(self.lbl_physics_report)
-        scroll_phys.setWidgetResizable(True)
-        scroll_phys.setMinimumHeight(200)
-        lay_detail.addWidget(scroll_phys)
-        grp_detail.setLayout(lay_detail)
-        lay_phys.addWidget(grp_detail, stretch=1)
+        grp_liste = QGroupBox("Blocs présents")
+        lay_liste = QVBoxLayout(grp_liste)
+        self.liste_blocs = QListWidget()
+        self.liste_blocs.setMaximumHeight(150)
+        self.liste_blocs.currentRowChanged.connect(self._selectionner_bloc)
+        lay_liste.addWidget(self.liste_blocs)
+        btn_supprimer = QPushButton("🗑  Supprimer sélectionné")
+        btn_supprimer.clicked.connect(self._supprimer_bloc)
+        lay_liste.addWidget(btn_supprimer)
+        grp_liste.setLayout(lay_liste)
+        lay_blocs.addWidget(grp_liste)
+        lay_blocs.addStretch()
+        onglets.addTab(tab_blocs, "Blocs")
 
-        tabs.addTab(tab_phys, "Résultats")
+        # Onglet "Charges"
+        tab_charges = QWidget()
+        lay_charges = QVBoxLayout(tab_charges)
+        grp_charges = QGroupBox("Charges — bloc sélectionné")
+        form_charges = QFormLayout()
 
-        layout.addWidget(tabs)
+        self.spin_force    = QDoubleSpinBox()
+        self.spin_force.setRange(0, 1e7); self.spin_force.setSuffix(" N"); self.spin_force.setSingleStep(100)
+        self.spin_pression = QDoubleSpinBox()
+        self.spin_pression.setRange(0, 1e6); self.spin_pression.setSuffix(" Pa"); self.spin_pression.setSingleStep(500)
+        self.spin_moment   = QDoubleSpinBox()
+        self.spin_moment.setRange(-1e6, 1e6); self.spin_moment.setSuffix(" N·m"); self.spin_moment.setSingleStep(100)
 
-        self.setStyleSheet(PANEL_QSS)
+        form_charges.addRow("Force ponctuelle:",  self.spin_force)
+        form_charges.addRow("Pression dist.:",    self.spin_pression)
+        form_charges.addRow("Moment fléch.:",     self.spin_moment)
+        grp_charges.setLayout(form_charges)
+        lay_charges.addWidget(grp_charges)
 
-    def _on_gravity_toggle(self, checked):
-        self.canvas.set_gravity(checked)
+        btn_appliquer = QPushButton("✅  Appliquer charges")
+        btn_appliquer.clicked.connect(self._appliquer_charges)
+        lay_charges.addWidget(btn_appliquer)
+        lay_charges.addStretch()
+        onglets.addTab(tab_charges, "Charges")
 
-    def _on_heatmap_toggle(self, checked):
-        self.canvas.set_heatmap(checked)
-        self.physics_callback()
+        layout.addWidget(onglets)
 
-    def _on_add(self):
-        mn = self.combo_mat.currentText()
-        self.canvas.add_rectangle(
-            self.spin_w.value(), self.spin_h.value(), material=mn)
+        # ── Résultats physiques ──
+        grp_resultats = QGroupBox("Résultats physiques")
+        lay_resultats = QVBoxLayout(grp_resultats)
 
-    def _on_remove_at(self, idx):
-        if 0 <= idx < len(self.canvas.rects):
-            self.canvas.remove_rectangle(idx)
+        self.lbl_resultats = QLabel("—")
+        self.lbl_resultats.setWordWrap(True)
+        self.lbl_resultats.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_resultats.setStyleSheet("font-family: Consolas; font-size: 9px; color: #222;")
 
-    def _on_select(self, row):
-        self._selected_rect = row
-        if 0 <= row < len(self.canvas.rects):
-            rd = self.canvas.rects[row]
-            self.spin_force.setValue(rd["ext_force"])
-            self.spin_pressure.setValue(rd["pressure"])
-            self.spin_moment.setValue(rd["moment"])
+        zone_scroll = QScrollArea()
+        zone_scroll.setWidget(self.lbl_resultats)
+        zone_scroll.setWidgetResizable(True)
+        zone_scroll.setMinimumHeight(240)
+        lay_resultats.addWidget(zone_scroll)
+        grp_resultats.setLayout(lay_resultats)
+        layout.addWidget(grp_resultats)
 
-    def _on_apply_loads(self):
-        row = self._selected_rect
-        if row is not None and 0 <= row < len(self.canvas.rects):
-            rd = self.canvas.rects[row]
-            rd["ext_force"] = self.spin_force.value()
-            rd["pressure"] = self.spin_pressure.value()
-            rd["moment"] = self.spin_moment.value()
-            self.physics_callback()
+        self.setStyleSheet("""
+            QFrame        { background: #f5f5f5; }
+            QGroupBox     { color: #1565c0; border: 1px solid #bbdefb; margin-top: 8px;
+                            padding-top: 6px; border-radius: 4px; font-weight: bold; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; }
+            QLabel        { color: #333; }
+            QDoubleSpinBox{ background: white; color: #222; border: 1px solid #90caf9;
+                            border-radius: 3px; padding: 2px; }
+            QPushButton   { background: #1565c0; color: white; border: none;
+                            border-radius: 4px; padding: 7px; font-weight: bold; }
+            QPushButton:hover { background: #1976d2; }
+            QListWidget   { background: white; color: #222; border: 1px solid #bbdefb; }
+            QComboBox     { background: white; color: #222; border: 1px solid #90caf9;
+                            border-radius: 3px; padding: 2px; }
+            QTabWidget::pane { border: 1px solid #bbdefb; background: white; }
+            QTabBar::tab  { background: #e3f2fd; color: #555; padding: 6px 14px; }
+            QTabBar::tab:selected { background: white; color: #1565c0; font-weight: bold; }
+            QScrollArea   { border: none; }
+            QCheckBox     { color: #1565c0; }
+        """)
 
-    def refresh_list(self):
-        self.list_widget.clear()
-        for i, rd in enumerate(self.canvas.rects):
-            p = rd["patch"]
-            text = (
-                f"[{i+1}] {rd['material']}  "
-                f"{p.get_width():.1f}×{p.get_height():.1f} m")
-            row = _block_list_row(self, i, text)
-            item = QListWidgetItem()
-            item.setSizeHint(row.sizeHint())
-            self.list_widget.addItem(item)
-            self.list_widget.setItemWidget(item, row)
+    # ── Slots ────────────────────────────────────────────────
 
-    def update_results(self, html):
-        self.lbl_results.setText(html)
+    def _toggle_gravite(self, active):
+        self.canvas.activer_gravite(active)
 
-    def update_physics_report(self, html):
-        self.lbl_physics_report.setText(html)
-
-    def _ensure_contact_tooltip(self):
-        if self._contact_tooltip is None:
-            # Parent = canvas : ancrage WM correct sur macOS ; move() reste global.
-            self._contact_tooltip = ContactTooltip(self.canvas)
-        return self._contact_tooltip
-
-    def _contact_tooltip_html(self, d):
-        ib, it = d["i_bot"], d["i_top"]
-        frac, Fc = d["frac"], d["F_c"]
-        return (
-            "<b style='color:#bf360c'>Surface de contact</b><br>"
-            f"Bloc supérieur <b>{it + 1}</b> → bloc inférieur <b>{ib + 1}</b><br>"
-            f"Effort transmis <b>Fc = {Fc:.0f} N</b><br>"
-            f"Recouvrement : <b>{frac * 100:.0f} %</b> "
+    def _ajouter_bloc(self):
+        nom_mat = self.combo_materiau.currentText()
+        mat     = self.MATERIAUX[nom_mat]
+        self.canvas.ajouter_bloc(
+            self.spin_largeur.value(),
+            self.spin_hauteur.value(),
+            materiau=nom_mat,
+            densite=mat["density"]
         )
 
-    def _place_contact_tooltip(self, tip, contact_center_global: QPoint):
-        """Quelques pixels au-dessus du centre du contact ; reste dans _bounds (plan)."""
-        tip.adjustSize()
-        gap_px = 6
-        w, h = tip.width(), tip.height()
-        x = contact_center_global.x() - w // 2
-        y = contact_center_global.y() - h - gap_px
-        tip.move(tip._clamp_top_left(QPoint(x, y)))
+    def _supprimer_bloc(self):
+        ligne = self.liste_blocs.currentRow()
+        if ligne >= 0:
+            self.canvas.supprimer_bloc(ligne)
 
-    def on_contact_pick(self, d):
-        self._contact_sel = (d["i_bot"], d["i_top"])
-        tip = self._ensure_contact_tooltip()
+    def _selectionner_bloc(self, ligne):
+        self._bloc_selectionne = ligne
+        if 0 <= ligne < len(self.canvas.blocs):
+            bloc = self.canvas.blocs[ligne]
+            self.spin_force.setValue(bloc["ext_force"])
+            self.spin_pression.setValue(bloc["pressure"])
+            self.spin_moment.setValue(bloc["moment"])
 
-        def _open():
-            tip.set_plot_bounds_global(self.canvas.axes_global_rect())
-            tip.set_rich_text(self._contact_tooltip_html(d))
-            pt = d.get("_press_global")
-            if pt is None:
-                pt = self.canvas.contact_point_global(d)
-            self._place_contact_tooltip(tip, pt)
-            tip.setWindowOpacity(1.0)
-            tip.show()
-            tip.raise_()
-            self.canvas.refine_contact_tooltip_position(tip)
-            # Si le centre est hors de tout écran (coords incorrectes), ramener visible.
-            c = tip.frameGeometry().center()
-            if QGuiApplication.screenAt(c) is None:
-                ps = QGuiApplication.primaryScreen()
-                if ps is not None:
-                    fr = tip.frameGeometry()
-                    fr.moveCenter(ps.availableGeometry().center())
-                    tip.move(fr.topLeft())
-            QApplication.processEvents()
+    def _appliquer_charges(self):
+        ligne = self._bloc_selectionne
+        if ligne is not None and 0 <= ligne < len(self.canvas.blocs):
+            bloc              = self.canvas.blocs[ligne]
+            bloc["ext_force"] = self.spin_force.value()
+            bloc["pressure"]  = self.spin_pression.value()
+            bloc["moment"]    = self.spin_moment.value()
+            self.callback_physique()
 
-        # Après le relâchement du clic sur le canvas (évite fermeture Popup).
-        QTimer.singleShot(10, _open)
+    def rafraichir_liste(self):
+        """Met à jour la liste des blocs dans le panneau."""
+        self.liste_blocs.clear()
+        for i, bloc in enumerate(self.canvas.blocs):
+            p = bloc["patch"]
+            self.liste_blocs.addItem(
+                f"[{i+1}] {bloc['material']}  {p.get_width():.1f} × {p.get_height():.1f} m"
+            )
 
-    def _hide_contact_popup(self):
-        if self._contact_tooltip is not None:
-            self._contact_tooltip.hide()
-        self._contact_sel = None
-
-    def refresh_contact_popup_if_open(self, pairs, stress_data):
-        tip = self._contact_tooltip
-        if tip is None or not tip.isVisible() or self._contact_sel is None:
-            return
-        ib, it = self._contact_sel
-        for p in pairs:
-            if p[0] == ib and p[1] == it:
-                frac = p[2]
-                sd = stress_data[it] if it < len(stress_data) else None
-                if sd is None:
-                    self._hide_contact_popup()
-                    return
-                Fc = sd["F_axial"]
-                tip.set_rich_text(self._contact_tooltip_html({
-                    "i_bot": ib, "i_top": it, "frac": frac, "F_c": Fc}))
-                tip.adjustSize()
-                self.canvas.refine_contact_tooltip_position(tip)
-                return
-        self._hide_contact_popup()
+    def afficher_resultats(self, html):
+        self.lbl_resultats.setText(html)
 
 
-# ─────────────────────────────────────────────
-#  Application principale
-# ─────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+#  Fenêtre principale
+# ──────────────────────────────────────────────────────────────
+
 class MaterialSimulationApp(QMainWindow):
-    def __init__(self):
+    """
+    Fenêtre principale de la simulation 2D.
+    Assemble le canvas et le panneau de contrôle,
+    et orchestre les calculs physiques.
+    """
+
+    def __init__(self, mode="2D", switch_callback=None):
         super().__init__()
-        self.setWindowTitle(
-            "Tensor Build — Simulateur de Résistance des Matériaux")
+        self.setWindowTitle("Tensor Build — Simulateur de Résistance des Matériaux")
         self.resize(1400, 900)
 
         central = QWidget()
         self.setCentralWidget(central)
-        ml = QHBoxLayout(central)
-        ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(0)
+        mise_en_page = QHBoxLayout(central)
+        mise_en_page.setContentsMargins(0, 0, 0, 0)
+        mise_en_page.setSpacing(0)
 
-        self.canvas = Canvas2D(central, on_rects_changed=self._on_changed)
-        ml.addWidget(self.canvas, stretch=1)
+        # Zone de dessin (gauche)
+        self.canvas = Canvas2D(central, on_blocs_changes=self._on_changed)
+        mise_en_page.addWidget(self.canvas, stretch=1)
 
-        self.panel = ControlPanel(self.canvas, self._on_changed)
-        self.canvas.set_on_contact_clicked(self.panel.on_contact_pick)
+        # Panneau de contrôle (droite, dans un dock)
+        self.panneau = PanneauControle(self.canvas, self._on_changed)
+
+        # On branche le bouton switch ici (pas dans le panneau)
+        # pour garder accès direct au callback
+        if switch_callback:
+            self.panneau.btn_switch_3d.clicked.connect(switch_callback)
+
         dock = QDockWidget("Contrôles", self)
-        dock.setWidget(self.panel)
+        dock.setWidget(self.panneau)
         dock.setMinimumWidth(320)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
 
-    def _on_changed(self, *, refresh_list=True):
-        if refresh_list:
-            self.panel.refresh_list()
-        stress_data, pairs = self._calculate_physics()
-        self.canvas.draw_stress(stress_data, pairs)
-        self.panel.refresh_contact_popup_if_open(pairs, stress_data)
+    def _on_changed(self):
+        """Appelé à chaque modification : recalcule et redessine."""
+        self.panneau.rafraichir_liste()
+        donnees_stress, paires = self._calculer_physique()
+        self.canvas.dessiner_contraintes(donnees_stress, paires)
 
-    def _calculate_physics(self):
-        rects = self.canvas.rects
-        if not rects:
-            self.panel.update_results("Aucun bloc.")
-            self.panel.update_physics_report("Aucun bloc.")
-            self.panel._hide_contact_popup()
+    def _calculer_physique(self):
+        """
+        Calcule pour chaque bloc :
+        - poids propre, force axiale totale (avec contact)
+        - contraintes de compression et de flexion (σ = M·y/I)
+        - taux d'utilisation par rapport à la limite élastique σ_y
+        Retourne les données de stress et les paires de contact.
+        """
+        blocs = self.canvas.blocs
+        if not blocs:
+            self.panneau.afficher_resultats("Aucun bloc.")
             return [], []
 
-        total_area, XG, YG, Ixx, Iyy, masse = _statistiques_globales_section(
-            rects)
+        MAT   = PanneauControle.MATERIAUX
+        lignes = []
 
-        head = [
+        # ── Propriétés globales de la section ──
+        aire_totale = sum(b["patch"].get_width() * b["patch"].get_height() for b in blocs)
+
+        XG = sum(
+            (b["patch"].get_xy()[0] + b["patch"].get_width()/2) *
+            b["patch"].get_width() * b["patch"].get_height()
+            for b in blocs
+        ) / aire_totale
+
+        YG = sum(
+            (b["patch"].get_xy()[1] + b["patch"].get_height()/2) *
+            b["patch"].get_width() * b["patch"].get_height()
+            for b in blocs
+        ) / aire_totale
+
+        # Moments d'inertie par rapport au centre de gravité (Steiner)
+        Ixx = sum(
+            (b["patch"].get_width() * b["patch"].get_height()**3) / 12 +
+            b["patch"].get_width() * b["patch"].get_height() *
+            (b["patch"].get_xy()[1] + b["patch"].get_height()/2 - YG)**2
+            for b in blocs
+        )
+        Iyy = sum(
+            (b["patch"].get_height() * b["patch"].get_width()**3) / 12 +
+            b["patch"].get_width() * b["patch"].get_height() *
+            (b["patch"].get_xy()[0] + b["patch"].get_width()/2 - XG)**2
+            for b in blocs
+        )
+        masse_totale = sum(b["density"] * b["patch"].get_width() * b["patch"].get_height() for b in blocs)
+
+        lignes += [
             "<b style='color:#1565c0'>══ Section globale ══</b>",
-            f"Aire totale : <b>{total_area:.4f} m²</b>",
-            f"CG (section) : <b>({XG:.3f}, {YG:.3f}) m</b>",
-            f"Ixx (global) : <b>{Ixx:.4f} m⁴</b>",
-            f"Iyy (global) : <b>{Iyy:.4f} m⁴</b>",
-            f"Masse linéique : <b>{masse:.1f} kg/m</b>",
+            f"Aire   : <b>{aire_totale:.4f} m²</b>",
+            f"CG     : <b>({XG:.3f}, {YG:.3f}) m</b>",
+            f"Ixx    : <b>{Ixx:.4f} m⁴</b>",
+            f"Iyy    : <b>{Iyy:.4f} m⁴</b>",
+            f"Masse  : <b>{masse_totale:.1f} kg/m</b>",
             "",
         ]
 
-        pairs = _contact_pairs(rects)
+        paires = _contact_pairs(blocs)
+        donnees_stress = []
 
-        stress_data = []
-        summaries = []
-        detail_lines = []
-        for i, rd in enumerate(rects):
-            _, _, w, h = _geom_patch(rd)
-            area = w * h
-            mat = MATERIALS.get(rd["material"], MATERIALS["Acier"])
+        for i, bloc in enumerate(blocs):
+            patch = bloc["patch"]
+            w, h  = patch.get_width(), patch.get_height()
+            x, y  = patch.get_xy()
+            aire  = w * h
+            mat   = MAT.get(bloc["material"], MAT["Acier"])
 
-            weight = rd["density"] * area * GRAVITY
-            F_ext = rd["ext_force"]
-            F_pressure = rd["pressure"] * w
+            # Forces appliquées sur ce bloc
+            poids          = bloc["density"] * aire * GRAVITY
+            F_ext          = bloc["ext_force"]
+            F_pression     = bloc["pressure"] * w  # pression × largeur = force totale
 
+            # Charge venant des blocs posés dessus (transfert de contact)
             F_contact = sum(
-                _charge_verticale_equivalente(rects[j])
-                for (ib, j, _) in pairs if ib == i
+                blocs[j]["density"] * blocs[j]["patch"].get_width() *
+                blocs[j]["patch"].get_height() * GRAVITY +
+                blocs[j]["ext_force"] +
+                blocs[j]["pressure"] * blocs[j]["patch"].get_width()
+                for (i_bas, j, _) in paires if i_bas == i
             )
 
-            F_axial = weight + F_ext + F_pressure + F_contact
-            sigma_axial = F_axial / area
+            # Contrainte axiale de compression : σ = F / A
+            F_axial     = poids + F_ext + F_pression + F_contact
+            sigma_axial = F_axial / aire
 
-            M = rd["moment"]
+            # Contraintes de flexion : σ = M × y / I
+            M       = bloc["moment"]
             I_local = (w * h**3) / 12
-            sig_bt = M * (h/2) / I_local if I_local > 0 else 0
-            sig_bb = M * (-h/2) / I_local if I_local > 0 else 0
-            sig_max = max(abs(sigma_axial + sig_bt), abs(sigma_axial + sig_bb))
+            sig_haut = M * (h/2)  / I_local if I_local > 0 else 0  # fibre haute
+            sig_bas  = M * (-h/2) / I_local if I_local > 0 else 0  # fibre basse
 
+            # Superposition : contrainte totale maximale
+            sigma_max = max(abs(sigma_axial + sig_haut), abs(sigma_axial + sig_bas))
+
+            # Taux d'utilisation par rapport à la limite élastique
             sigma_y = mat["sigma_y"]
-            util = sig_max / sigma_y * 100
-            status, sym = _statut_utilisation(util)
+            taux    = sigma_max / sigma_y * 100
+            statut  = "✅ OK" if taux < 80 else ("⚠️ Attention" if taux < 100 else "❌ RUPTURE")
 
-            summaries.append(
-                f"  Bloc <b>{i + 1}</b> ({rd['material']}) : "
-                f"σ = <b>{sig_max/1e6:.2f} MPa</b>, "
-                f"<b>{util:.0f}%</b> {sym}")
-
-            detail_lines += [
-                f"<b style='color:#e65100'>── Bloc {i+1} ({rd['material']}) ──</b>",
-                f"  Poids propre   : {weight:.1f} N",
+            lignes += [
+                f"<b style='color:#e65100'>── Bloc {i+1} ({bloc['material']}) ──</b>",
+                f"  Poids propre   : {poids:.1f} N",
                 f"  Charge contact : {F_contact:.1f} N",
                 f"  Force ext.     : {F_ext:.1f} N",
-                f"  Pression       : {F_pressure:.1f} N",
+                f"  Pression       : {F_pression:.1f} N",
                 f"  <b>F axiale total : {F_axial:.1f} N</b>",
                 f"  σ axiale       : {sigma_axial/1e6:.3f} MPa",
             ]
             if abs(M) > 0:
-                detail_lines += [
-                    f"  σ flex haut    : {sig_bt/1e6:.3f} MPa",
-                    f"  σ flex bas     : {sig_bb/1e6:.3f} MPa",
+                lignes += [
+                    f"  σ flex haut    : {sig_haut/1e6:.3f} MPa",
+                    f"  σ flex bas     : {sig_bas/1e6:.3f} MPa",
                 ]
-            detail_lines += [
-                f"  <b>σ max          : {sig_max/1e6:.3f} MPa</b>",
+            lignes += [
+                f"  <b>σ max          : {sigma_max/1e6:.3f} MPa</b>",
                 f"  σ_y limite     : {sigma_y/1e6:.0f} MPa",
-                f"  Utilisation    : {util:.1f}% {status}",
+                f"  Utilisation    : {taux:.1f}% {statut}",
                 "",
             ]
 
-            stress_data.append({
-                "sigma_total":       sig_max,
+            donnees_stress.append({
+                "sigma_total":       sigma_max,
                 "sigma_axial":       sigma_axial,
-                "sigma_bending_top": sig_bt,
-                "sigma_bending_bot": sig_bb,
-                "ext_force":         F_ext + F_pressure,
-                "pressure":          rd["pressure"],
-                "utilization":       util,
+                "sigma_bending_top": sig_haut,
+                "sigma_bending_bot": sig_bas,
+                "ext_force":         F_ext + F_pression,
+                "pressure":          bloc["pressure"],
+                "utilization":       taux,
                 "F_axial":           F_axial,
             })
 
-        contact_lines = []
-        if pairs:
-            contact_lines.append(
-                "<b style='color:#ff6f00'>══ Contacts détectés ══</b>")
-            for (ib, it, frac) in pairs:
-                Fc = stress_data[it]["F_axial"]
-                contact_lines.append(
-                    f"  Bloc {it+1} (sup.) → Bloc {ib+1} (inf.) : "
-                    f"<b>{Fc:.0f} N</b> — recouvrement "
-                    f"<b>{frac*100:.0f}%</b> de la largeur du plus petit bloc"
+        # Résumé des contacts dans le panneau
+        if paires:
+            lignes.append("<b style='color:#ff6f00'>══ Contacts détectés ══</b>")
+            for (i_bas, i_haut, frac) in paires:
+                Fc = donnees_stress[i_haut]["F_axial"]
+                lignes.append(
+                    f"  Bloc {i_haut+1} → Bloc {i_bas+1} : "
+                    f"<b>{Fc:.0f} N</b> ({frac*100:.0f}% surface)"
                 )
-            contact_lines.append("")
+            lignes.append("")
 
-        lines = (
-            head
-            + [
-                "<b style='color:#2e7d32'>══ Contraintes sur les blocs ══</b>",
-                "<span style='color:#666;font-size:9px'>"
-                "Résumé σ / utilisation (affiché auparavant sur le schéma).</span>",
-            ]
-            + summaries
-            + ["", "<b style='color:#1565c0'>══ Détail par bloc ══</b>", ""]
-            + detail_lines
-            + contact_lines
-        )
+        self.panneau.afficher_resultats("<br>".join(lignes))
+        return donnees_stress, paires
 
-        self.panel.update_physics_report("<br>".join(lines))
 
-        self.panel.update_results(
-            "<div style='padding:4px;'>"
-            "<b style='color:#f9a825'>⊕ Centre de gravité</b><br><br>"
-            "<span style='color:#555'>Position (x, y) en mètres<br>"
-            f"<b style='color:#e65100;font-size:13px'>({XG:.2f}, {YG:.2f})</b>"
-            "</div>"
-        )
-        return stress_data, pairs
-
+# ──────────────────────────────────────────────────────────────
+#  Point d'entrée (lancement direct du fichier)
+# ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    window = MaterialSimulationApp()
-    window.show()
-    sys.exit(app.exec())
+    fenetre = MaterialSimulationApp()
+    fenetre.show()
+    sys.exit(app.exec()) 
