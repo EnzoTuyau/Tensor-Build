@@ -738,24 +738,24 @@ class PanneauControle(QFrame):
         layout.addWidget(grp_resultats)
 
         self.setStyleSheet("""
-            QFrame        { background: #f5f5f5; }
-            QGroupBox     { color: #1565c0; border: 1px solid #bbdefb; margin-top: 8px;
-                            padding-top: 6px; border-radius: 4px; font-weight: bold; }
-            QGroupBox::title { subcontrol-origin: margin; left: 8px; }
-            QLabel        { color: #333; }
-            QDoubleSpinBox{ background: white; color: #222; border: 1px solid #90caf9;
-                            border-radius: 3px; padding: 2px; }
-            QPushButton   { background: #1565c0; color: white; border: none;
-                            border-radius: 4px; padding: 7px; font-weight: bold; }
-            QPushButton:hover { background: #1976d2; }
-            QListWidget   { background: white; color: #222; border: 1px solid #bbdefb; }
-            QComboBox     { background: white; color: #222; border: 1px solid #90caf9;
-                            border-radius: 3px; padding: 2px; }
-            QTabWidget::pane { border: 1px solid #bbdefb; background: white; }
-            QTabBar::tab  { background: #e3f2fd; color: #555; padding: 6px 14px; }
-            QTabBar::tab:selected { background: white; color: #1565c0; font-weight: bold; }
-            QScrollArea   { border: none; }
-            QCheckBox     { color: #1565c0; }
+            QFrame        { background: #06080c; }
+            QGroupBox     { color: #dbe8ff; border: 1px solid #223753; margin-top: 8px;
+                            padding-top: 6px; border-radius: 6px; font-weight: bold; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; color: #9ec8ff; }
+            QLabel        { color: #dbe8ff; }
+            QDoubleSpinBox{ background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72;
+                            border-radius: 4px; padding: 2px; }
+            QPushButton   { background: #0d8bff; color: white; border: none;
+                            border-radius: 6px; padding: 7px; font-weight: bold; }
+            QPushButton:hover { background: #2c9bff; }
+            QListWidget   { background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72; }
+            QComboBox     { background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72;
+                            border-radius: 4px; padding: 2px; }
+            QTabWidget::pane { border: 1px solid #223753; background: #0a1018; }
+            QTabBar::tab  { background: #101a29; color: #bcd6ff; padding: 6px 14px; }
+            QTabBar::tab:selected { background: #17253a; color: #eaf2ff; font-weight: bold; }
+            QScrollArea   { border: none; background: #0a1018; }
+            QCheckBox     { color: #9ec8ff; }
         """)
 
     # ── Slots ────────────────────────────────────────────────

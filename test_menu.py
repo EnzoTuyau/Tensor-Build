@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -11,7 +12,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from tensor2D import MaterialSimulationApp as App2D
-from tensor3D import MaterialSimulationApp as App3D
+
+_MAIN_DIR = Path(__file__).resolve().parent / "Main"
+if str(_MAIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_MAIN_DIR))
+
+from MaterielSimulation import MaterielSimulationApp as App3D
 
 
 class MenuDialog(QDialog):
@@ -242,26 +248,39 @@ class MenuDialog(QDialog):
 class GestionnaireApplication:
     def __init__(self):
         self.current_window = None
+        self.current_mode = None
+        self.window_2d = None
+        self.window_3d = None
+
+    def _show_window(self, target_window, target_mode):
+        if self.current_window and self.current_window is not target_window:
+            self.current_window.hide()
+
+        self.current_window = target_window
+        self.current_mode = target_mode
+        self.current_window.show()
+        self.current_window.raise_()
+        self.current_window.activateWindow()
 
     def open_2d(self):
-        # Ouvrir la nouvelle fenêtre avant de fermer l'ancienne
-        # pour qu'il n'y ait jamais zéro fenêtre visible
-        old = self.current_window
-        self.current_window = App2D(mode="2D", switch_callback=self.open_3d)
-        self.current_window.show()
-        self.current_window.raise_()
-        self.current_window.activateWindow()
-        if old:
-            old.close()
+        if self.current_mode == "2D" and self.current_window is not None:
+            self.current_window.raise_()
+            self.current_window.activateWindow()
+            return
+
+        if self.window_2d is None:
+            self.window_2d = App2D(mode="2D", switch_callback=self.open_3d)
+        self._show_window(self.window_2d, "2D")
 
     def open_3d(self):
-        old = self.current_window
-        self.current_window = App3D(switch_callback=self.open_2d)
-        self.current_window.show()
-        self.current_window.raise_()
-        self.current_window.activateWindow()
-        if old:
-            old.close()
+        if self.current_mode == "3D" and self.current_window is not None:
+            self.current_window.raise_()
+            self.current_window.activateWindow()
+            return
+
+        if self.window_3d is None:
+            self.window_3d = App3D(switch_callback=self.open_2d)
+        self._show_window(self.window_3d, "3D")
 
 
 if __name__ == "__main__":
