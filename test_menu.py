@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from tensor2D import MaterialSimulationApp as App2D
+from tensor2d import MaterialSimulationApp as App2D
 
 _MAIN_DIR = Path(__file__).resolve().parent / "Main"
 if str(_MAIN_DIR) not in sys.path:
