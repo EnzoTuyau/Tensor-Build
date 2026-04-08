@@ -12,6 +12,11 @@ class Camera:
         self._suivi_actif = False
         self._derniere_pos_objet = None  # dernière position connue de l'objet suivi
 
+    @property
+    def position(self):
+        return self.plotter.camera.position
+
+
     def initialiser(self):
         """Applique la position de départ."""
         self.plotter.camera.position = self.position_initiale
