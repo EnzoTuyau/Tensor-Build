@@ -1,11 +1,28 @@
 import sys
+import platform
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+
+
+if platform.system() == "Darwin":
+    class SafeQtInteractor(QtInteractor):
+        _render_deferred = False
+
+        def paintEvent(self, ev):
+            if not self._render_deferred:
+                self._render_deferred = True
+                QTimer.singleShot(0, self._deferred_render)
+
+        def _deferred_render(self):
+            self._Iren.Render()
+            self._render_deferred = False
+else:
+    SafeQtInteractor = QtInteractor
 
 
 class MaterialSimulationApp(QMainWindow):
@@ -25,8 +42,8 @@ class MaterialSimulationApp(QMainWindow):
         scene.layout = QHBoxLayout(scene.central_widget)
 
         # --- 1. Zone 3D (Gauche) ---
-        # On utilise QtInteractor de pyvistaqt pour intégrer la 3D dans Qt
-        scene.plotter = QtInteractor(scene.central_widget)
+        # Interactor "safe" (notamment utile sur macOS).
+        scene.plotter = SafeQtInteractor(scene.central_widget)
         scene.plotter.set_background("white")
         scene.plotter.add_axes()
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
@@ -48,7 +65,10 @@ class MaterialSimulationApp(QMainWindow):
         # --- NOUVEAU BOUTON DE BASCULE ---
         scene.btn_switch_2d = QPushButton("🖥️ Retourner en mode 2D")
         scene.btn_switch_2d.setStyleSheet("background-color: #1565c0; font-size: 12px; color: white;")
-        scene.btn_switch_2d.clicked.connect(scene.switch_callback)
+        if scene.switch_callback is not None:
+            scene.btn_switch_2d.clicked.connect(scene.switch_callback)
+        else:
+            scene.btn_switch_2d.setEnabled(False)
         scene.control_layout.addWidget(scene.btn_switch_2d)
         # ---------------------------------
 
