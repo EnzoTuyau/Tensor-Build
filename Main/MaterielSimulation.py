@@ -14,8 +14,9 @@ FORMES_DISPONIBLES = {
 }
 class MaterielSimulationApp(QMainWindow):
 
-    def __init__(scene):
+    def __init__(scene, switch_callback=None):
         super().__init__()
+        scene.switch_callback = switch_callback
 
         scene.setWindowTitle("Tensor Build - Simulateur de Structure")
         scene.resize(1200, 800)
@@ -47,6 +48,35 @@ class MaterielSimulationApp(QMainWindow):
         scene.layout.addWidget(scene.control_panel, stretch=1)
 
         scene.setup_ui_controls()
+        scene.setStyleSheet("""
+            QMainWindow, QWidget { background: #050607; color: #eaf2ff; }
+            QGroupBox {
+                color: #dbe8ff;
+                border: 1px solid #223753;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 6px;
+                font-weight: bold;
+            }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; color: #9ec8ff; }
+            QLabel { color: #dbe8ff; }
+            QComboBox, QDoubleSpinBox {
+                background: #0f1723;
+                color: #eaf2ff;
+                border: 1px solid #2f4d72;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QPushButton {
+                background: #0d8bff;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 8px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #2c9bff; }
+        """)
 
         # Liste d'objets Forme
         scene.objects = []
@@ -56,6 +86,16 @@ class MaterielSimulationApp(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def setup_ui_controls(scene):
+        # --- Retour mode 2D ---
+        scene.btn_switch_2d = QPushButton("🖥️  Retourner en mode 2D")
+        scene.btn_switch_2d.setStyleSheet(
+            "background-color: #1565c0; color: white; font-size: 12px; padding: 8px;"
+        )
+        if scene.switch_callback is not None:
+            scene.btn_switch_2d.clicked.connect(scene.switch_callback)
+        else:
+            scene.btn_switch_2d.setEnabled(False)
+        scene.control_layout.addWidget(scene.btn_switch_2d)
 
 
         # --- 1. Ajouter une forme ---
