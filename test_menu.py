@@ -1,9 +1,18 @@
+import os
 import sys
+
+_root = os.path.dirname(os.path.abspath(__file__))
+_main = os.path.join(_root, "Main")
+if _main not in sys.path:
+    sys.path.insert(0, _main)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
 
 from tensor2d import MaterialSimulationApp as App2D
-# from Main.MaterielSimulation import MaterielSimulationApp as App3D
+from MaterielSimulation import MaterielSimulationApp as App3D
 
 
 class MenuDialog(QDialog):
@@ -59,8 +68,7 @@ class GestionnaireApplication:
 
     def open_3d(self):
         old = self.current_window
-        # self.current_window = App3D(switch_callback=self.open_2d)
-        self.current_window = None
+        self.current_window = App3D()
         self.current_window.show()
         if old:
             old.close()
