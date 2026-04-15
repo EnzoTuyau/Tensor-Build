@@ -1,3 +1,7 @@
+from troisDimensions.app.MaterielSimulation import MaterielSimulationApp as App3D
+from deuxDimensions.app.tensor2d import MaterialSimulationApp as App2D
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QPushButton
 import os
 import sys
 
@@ -7,21 +11,6 @@ if _main not in sys.path:
     sys.path.insert(0, _main)
 if _root not in sys.path:
     sys.path.insert(0, _root)
-
-from pathlib import Path
-from PySide6.QtWidgets import (
-    QApplication,
-    QDialog,
-    QVBoxLayout,
-    QLabel,
-    QPushButton,
-    QHBoxLayout,
-    QWidget,
-)
-from PySide6.QtCore import Qt
-
-from tensor2d import MaterialSimulationApp as App2D
-from MaterialSimulation import MaterialSimulationApp as App3D
 
 
 class MenuDialog(QDialog):
