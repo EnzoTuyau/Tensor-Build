@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from tensor2d import MaterialSimulationApp as App2D
-from tensor3D import MaterialSimulationApp as App3D
+from MaterialSimulation import MaterialSimulationApp as App3D
 
 
 class MenuDialog(QDialog):
