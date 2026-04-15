@@ -3,6 +3,7 @@ import numpy as np
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
+from PySide6.QtCore import QEvent
 from SafeQtInteractor import SafeQtInteractor
 from Formes import Cube, Cylindre, PoutreCarree, PrismeTriangulaire, Sphere, Vis
 from Environnement import Sol, Gravite
@@ -80,6 +81,9 @@ class MaterielSimulationApp(QMainWindow):
 
         # Liste d'objets Forme
         scene.objects = []
+        scene._resize_drag_active = False
+        scene._resize_drag_last_y = None
+        scene.plotter.interactor.installEventFilter(scene)
 
     # ------------------------------------------------------------------ #
     #  UI                                                                  #
@@ -315,6 +319,46 @@ class MaterielSimulationApp(QMainWindow):
         scene.plotter.remove_actor(forme.actor)
         forme.actor = scene.plotter.add_mesh(
             forme.mesh, color="yellow", show_edges=True, reset_camera=False)
+
+    def eventFilter(scene, obj, event):
+        if obj is scene.plotter.interactor:
+            if event.type() == QEvent.MouseButtonPress and scene.forme_selectionnee is not None:
+                if event.button() == 1:  # clic gauche
+                    scene._resize_drag_active = True
+                    scene._resize_drag_last_y = event.position().y()
+                    return True
+            elif event.type() == QEvent.MouseMove and scene._resize_drag_active and scene.forme_selectionnee is not None:
+                y_now = event.position().y()
+                dy = scene._resize_drag_last_y - y_now
+                if abs(dy) >= 1:
+                    facteur = 1.0 + (dy * 0.008)
+                    facteur = max(0.2, min(5.0, facteur))
+
+                    forme = scene.forme_selectionnee
+                    new_r = max(0.1, forme.params["rayon"] * facteur)
+                    new_l = max(0.1, forme.params["longueur"] * facteur)
+                    forme.params["rayon"] = new_r
+                    forme.params["longueur"] = new_l
+
+                    scene.spin_radius.blockSignals(True)
+                    scene.spin_length.blockSignals(True)
+                    scene.spin_radius.setValue(new_r)
+                    scene.spin_length.setValue(new_l)
+                    scene.spin_radius.blockSignals(False)
+                    scene.spin_length.blockSignals(False)
+
+                    scene.dessiner_forme(forme)
+                    scene.plotter.remove_actor(forme.actor)
+                    forme.actor = scene.plotter.add_mesh(
+                        forme.mesh, color="yellow", show_edges=True, reset_camera=False)
+                    scene._resize_drag_last_y = y_now
+                return True
+            elif event.type() == QEvent.MouseButtonRelease and scene._resize_drag_active:
+                scene._resize_drag_active = False
+                scene._resize_drag_last_y = None
+                return True
+
+        return super().eventFilter(obj, event)
 
     def update_materiel(scene):
         """Recolore uniquement la forme sélectionnée."""

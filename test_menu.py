@@ -8,16 +8,23 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QWidget,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt
 
-from tensor2D import MaterialSimulationApp as App2D
-
 _MAIN_DIR = Path(__file__).resolve().parent / "Main"
-if str(_MAIN_DIR) not in sys.path:
-    sys.path.insert(0, str(_MAIN_DIR))
 
-from MaterielSimulation import MaterielSimulationApp as App3D
+
+def _load_2d_app():
+    from tensor2D import MaterialSimulationApp
+    return MaterialSimulationApp
+
+
+def _load_3d_app():
+    if str(_MAIN_DIR) not in sys.path:
+        sys.path.insert(0, str(_MAIN_DIR))
+    from MaterielSimulation import MaterielSimulationApp
+    return MaterielSimulationApp
 
 
 class MenuDialog(QDialog):
@@ -269,6 +276,15 @@ class GestionnaireApplication:
             return
 
         if self.window_2d is None:
+            try:
+                App2D = _load_2d_app()
+            except Exception as exc:
+                QMessageBox.critical(
+                    None,
+                    "Erreur chargement mode 2D",
+                    f"Impossible de charger le mode 2D.\n\n{exc}",
+                )
+                return
             self.window_2d = App2D(mode="2D", switch_callback=self.open_3d)
         self._show_window(self.window_2d, "2D")
 
@@ -279,6 +295,15 @@ class GestionnaireApplication:
             return
 
         if self.window_3d is None:
+            try:
+                App3D = _load_3d_app()
+            except Exception as exc:
+                QMessageBox.critical(
+                    None,
+                    "Erreur chargement mode 3D",
+                    f"Impossible de charger le mode 3D.\n\n{exc}",
+                )
+                return
             self.window_3d = App3D(switch_callback=self.open_2d)
         self._show_window(self.window_3d, "3D")
 

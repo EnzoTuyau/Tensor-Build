@@ -159,6 +159,8 @@ class Canvas2D(FigureCanvasQTAgg):
         self.blocs              = []      # liste de dicts {patch, material, density, ...}
         self._idx_drag          = None    # index du bloc en cours de drag
         self._offset_drag       = None    # décalage souris/coin du bloc
+        self._mode_redim        = False   # True quand on redimensionne un bloc
+        self._resize_origin     = None    # état initial du bloc au début du resize
         self._on_blocs_changes  = on_blocs_changes
         self.gravite_active     = False
 
@@ -334,9 +336,24 @@ class Canvas2D(FigureCanvasQTAgg):
         idx = self._tester_clic(event)
         if idx is not None:
             self._idx_drag    = idx
-            xy                = self.blocs[idx]["patch"].get_xy()
+            patch             = self.blocs[idx]["patch"]
+            xy                = patch.get_xy()
+            h                 = patch.get_height()
             # On mémorise où dans le bloc on a cliqué pour un drag naturel
             self._offset_drag = (event.xdata - xy[0], event.ydata - xy[1])
+            # Clic proche du haut du bloc: drag vertical = redimensionnement.
+            # Le resize garde la base au sol/empilement et ajuste aussi la largeur.
+            self._mode_redim = (event.ydata - xy[1]) >= (0.75 * h)
+            if self._mode_redim:
+                self._resize_origin = {
+                    "x": xy[0],
+                    "y": xy[1],
+                    "w": patch.get_width(),
+                    "h": h,
+                    "event_y": event.ydata,
+                }
+            else:
+                self._resize_origin = None
 
     def _souris_mouvement(self, event):
         if self._idx_drag is None or event.inaxes != self.axes:
@@ -347,15 +364,32 @@ class Canvas2D(FigureCanvasQTAgg):
         patch    = self.blocs[self._idx_drag]["patch"]
         xmin, xmax = self.axes.get_xlim()
         _, ymax    = self.axes.get_ylim()
-        w, h       = patch.get_width(), patch.get_height()
+        if self._mode_redim and self._resize_origin is not None:
+            origine = self._resize_origin
+            dy = event.ydata - origine["event_y"]
+            ratio = max(0.2, 1.0 + (dy / max(origine["h"], 0.1)))
 
-        # Limite le déplacement aux bords du canvas
-        x = max(xmin,     min(xmax - w, event.xdata - self._offset_drag[0]))
-        y = max(GROUND_Y, min(ymax - h, event.ydata - self._offset_drag[1]))
-        patch.set_xy((x, y))
+            new_h = max(0.1, origine["h"] * ratio)
+            new_w = max(0.1, origine["w"] * ratio)
 
-        # Empêche la traversée d'autres blocs en temps réel
-        _resoudre_collision(self._idx_drag, self.blocs)
+            # Garde la base fixe et centre horizontalement pendant le resize.
+            new_x = origine["x"] + (origine["w"] - new_w) / 2.0
+            new_x = max(xmin, min(xmax - new_w, new_x))
+            new_h = min(new_h, ymax - origine["y"])
+
+            patch.set_xy((new_x, origine["y"]))
+            patch.set_width(new_w)
+            patch.set_height(new_h)
+            _resoudre_collision(self._idx_drag, self.blocs)
+        else:
+            w, h = patch.get_width(), patch.get_height()
+            # Limite le déplacement aux bords du canvas
+            x = max(xmin,     min(xmax - w, event.xdata - self._offset_drag[0]))
+            y = max(GROUND_Y, min(ymax - h, event.ydata - self._offset_drag[1]))
+            patch.set_xy((x, y))
+
+            # Empêche la traversée d'autres blocs en temps réel
+            _resoudre_collision(self._idx_drag, self.blocs)
 
         self.draw_idle()
         self._notifier()
@@ -363,6 +397,8 @@ class Canvas2D(FigureCanvasQTAgg):
     def _souris_relache(self, event):
         self._idx_drag    = None
         self._offset_drag = None
+        self._mode_redim = False
+        self._resize_origin = None
 
     def _notifier(self):
         """Informe l'application principale qu'un bloc a bougé ou changé."""
