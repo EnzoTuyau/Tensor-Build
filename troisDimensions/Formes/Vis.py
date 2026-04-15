@@ -1,5 +1,5 @@
 import pyvista as pv
-from Formes.Forme import Forme
+from .Forme import Forme
 
 class Vis(Forme):
     NOM = "Vis"

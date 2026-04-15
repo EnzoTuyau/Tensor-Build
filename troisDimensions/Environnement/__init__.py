@@ -1,2 +1,2 @@
-from Environnement.Sol import Sol
-from Environnement.Gravite import Gravite
+from .Sol import Sol
+from .Gravite import Gravite
