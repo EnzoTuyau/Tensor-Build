@@ -1,4 +1,13 @@
+import os
 import sys
+
+_root = os.path.dirname(os.path.abspath(__file__))
+_main = os.path.join(_root, "Main")
+if _main not in sys.path:
+    sys.path.insert(0, _main)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication,
@@ -11,13 +20,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from tensor2D import MaterialSimulationApp as App2D
-
-_MAIN_DIR = Path(__file__).resolve().parent / "Main"
-if str(_MAIN_DIR) not in sys.path:
-    sys.path.insert(0, str(_MAIN_DIR))
-
-from MaterielSimulation import MaterielSimulationApp as App3D
+from tensor2d import MaterialSimulationApp as App2D
+from tensor3D import MaterialSimulationApp as App3D
 
 
 class MenuDialog(QDialog):
@@ -26,19 +30,30 @@ class MenuDialog(QDialog):
         self.setWindowTitle("TensorBuild - Choix de la simulation")
         self.setFixedSize(820, 500)
         self.mode = None
-        self.btn_2d = None
-        self.btn_3d = None
-        self.btn_start = None
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(22, 18, 22, 18)
-        root.setSpacing(8)
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
 
-        header = self._build_header()
-        body = self._build_body()
+        label = QLabel(
+            "Bienvenue dans TensorBuild!\nVeuillez choisir une simulation :")
+        label.setStyleSheet(
+            "font-size: 15px; font-weight: bold; color: #1565c0;")
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
 
-        root.addWidget(header)
-        root.addLayout(body, 1)
+        btn_2d = QPushButton("Simulation 2D")
+        btn_3d = QPushButton("Simulation 3D")
+        btn_2d.setStyleSheet("padding: 10px; font-size: 13px;")
+        btn_3d.setStyleSheet("padding: 10px; font-size: 13px;")
+        layout.addWidget(btn_2d)
+        layout.addWidget(btn_3d)
+
+        btn_2d.clicked.connect(self.launch_2d)
+        btn_3d.clicked.connect(self.launch_3d)
+
+        self.setLayout(layout)
+
+    def launch_2d(self):
         self.mode = "2D"
         self._refresh_mode_buttons()
 
@@ -273,20 +288,16 @@ class GestionnaireApplication:
         self._show_window(self.window_2d, "2D")
 
     def open_3d(self):
-        if self.current_mode == "3D" and self.current_window is not None:
-            self.current_window.raise_()
-            self.current_window.activateWindow()
-            return
-
-        if self.window_3d is None:
-            self.window_3d = App3D(switch_callback=self.open_2d)
-        self._show_window(self.window_3d, "3D")
+        old = self.current_window
+        self.current_window = App3D(switch_callback=self.open_2d)
+        self.current_window.show()
+        if old:
+            old.close()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    
     app.setQuitOnLastWindowClosed(False)
 
     manager = GestionnaireApplication()
