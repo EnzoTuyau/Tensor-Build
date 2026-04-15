@@ -31,7 +31,6 @@ GRAVITE_REF = Gravite()
 GRAVITY   = GRAVITE_REF.g   # accélération gravitationnelle (m/s²)
 GROUND_Y  = 0.0    # position y du sol sur le canvas
 SNAP_TOL  = 0.18   # distance max pour considérer deux blocs en contact (m)
-FALL_STEP = 0.12   # distance de chute par tick de physique (m)
 TIMER_MS  = 30     # intervalle du timer de physique (ms) — ~33 fps
 
 
@@ -218,6 +217,9 @@ class Canvas2D(FigureCanvasQTAgg):
             self._timer_physique.start()
         else:
             self._timer_physique.stop()
+            # Stoppe proprement le mouvement vertical quand la gravité est coupée.
+            for bloc in self.blocs:
+                bloc["vitesse_y"] = 0.0
 
     def _tick_physique(self):
         """
@@ -229,6 +231,7 @@ class Canvas2D(FigureCanvasQTAgg):
             return
 
         a_bouge = False
+        dt = TIMER_MS / 1000.0
 
         # On traite les blocs du bas vers le haut pour éviter les conflits
         ordre = sorted(
@@ -261,9 +264,16 @@ class Canvas2D(FigureCanvasQTAgg):
 
             # Si le bloc est encore au-dessus de son plancher, il descend
             if y > plancher + 0.001:
-                nouvelle_y = max(plancher, y - FALL_STEP)
+                bloc = self.blocs[idx]
+                bloc["vitesse_y"] += GRAVITY * dt
+                nouvelle_y = y - (bloc["vitesse_y"] * dt)
+                if nouvelle_y <= plancher:
+                    nouvelle_y = plancher
+                    bloc["vitesse_y"] = 0.0
                 patch.set_xy((x, nouvelle_y))
                 a_bouge = True
+            else:
+                self.blocs[idx]["vitesse_y"] = 0.0
 
         if a_bouge:
             self.draw_idle()
@@ -301,6 +311,7 @@ class Canvas2D(FigureCanvasQTAgg):
             "ext_force":  0.0,   # force ponctuelle appliquée (N)
             "moment":     0.0,   # moment fléchissant (N·m)
             "pressure":   0.0,   # pression distribuée (Pa)
+            "vitesse_y":  0.0,   # vitesse verticale pour une chute accélérée
         })
         self._notifier()
 

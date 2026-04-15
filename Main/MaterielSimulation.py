@@ -401,7 +401,7 @@ class MaterielSimulationApp(QMainWindow):
         mat_name = scene.selecteur_materiaux.currentText()
         g = scene.gravite.g  # utilise le g de l'objet Gravite
         target_fps = 60.0
-        dt = 1.0 / target_fps
+        dt_cible = 1.0 / target_fps
 
         etats = []
         for forme in formes:
@@ -415,8 +415,13 @@ class MaterielSimulationApp(QMainWindow):
             })
 
         impacts = []
+        dernier_t = time.perf_counter()
         while not all(etat["termine"] for etat in etats):
             frame_start = time.perf_counter()
+            dt = min(0.05, frame_start - dernier_t)
+            if dt <= 0:
+                dt = dt_cible
+            dernier_t = frame_start
 
             for etat in etats:
                 if etat["termine"]:
@@ -449,7 +454,7 @@ class MaterielSimulationApp(QMainWindow):
             scene.plotter.render()
             QApplication.processEvents()
 
-            reste = dt - (time.perf_counter() - frame_start)
+            reste = dt_cible - (time.perf_counter() - frame_start)
             if reste > 0:
                 time.sleep(reste)
 
