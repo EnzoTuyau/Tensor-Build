@@ -20,13 +20,15 @@ from PySide6.QtWidgets import (
     QCheckBox,
 )
 from PySide6.QtCore import Qt, QTimer
+from Environnement import Gravite
 
 
 # ──────────────────────────────────────────────────────────────
 #  Constantes globales
 # ──────────────────────────────────────────────────────────────
 
-GRAVITY   = 9.81   # accélération gravitationnelle (m/s²)
+GRAVITE_REF = Gravite()
+GRAVITY   = GRAVITE_REF.g   # accélération gravitationnelle (m/s²)
 GROUND_Y  = 0.0    # position y du sol sur le canvas
 SNAP_TOL  = 0.18   # distance max pour considérer deux blocs en contact (m)
 FALL_STEP = 0.12   # distance de chute par tick de physique (m)
@@ -137,21 +139,21 @@ class Canvas2D(FigureCanvasQTAgg):
     """
 
     def __init__(self, parent=None, on_blocs_changes=None):
-        # Création de la figure matplotlib avec fond blanc
-        fig = Figure(figsize=(12, 12), facecolor="white")
+        # Création de la figure matplotlib avec thème sombre cohérent.
+        fig = Figure(figsize=(12, 12), facecolor="#050607")
         fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
         self.axes = fig.add_subplot(111)
         self.axes.set_aspect("equal")
-        self.axes.set_facecolor("white")
-        self.axes.grid(True, color="#dddddd", linewidth=0.6, linestyle="--")
+        self.axes.set_facecolor("#0a1018")
+        self.axes.grid(True, color="#223753", linewidth=0.6, linestyle="--")
         self.axes.set_xlim(-2, 12)
         self.axes.set_ylim(-1.5, 12)
         self.axes.set_xticks(range(-2, 13))
         self.axes.set_yticks(range(-1, 13))
-        self.axes.tick_params(colors="#aaaaaa", labelsize=7)
+        self.axes.tick_params(colors="#9eb4d9", labelsize=7)
         for bordure in self.axes.spines.values():
-            bordure.set_edgecolor("#cccccc")
+            bordure.set_edgecolor("#2f4d72")
 
         super().__init__(fig)
 
@@ -196,7 +198,7 @@ class Canvas2D(FigureCanvasQTAgg):
 
         self._patch_sol = Rectangle(
             (xmin, GROUND_Y - 0.5), xmax - xmin, 0.5,
-            facecolor="#e8f5e9", edgecolor="#388e3c",
+            facecolor="#101a29", edgecolor="#2ea0ff",
             linewidth=2, hatch="////", zorder=0
         )
         self.axes.add_patch(self._patch_sol)
@@ -204,7 +206,7 @@ class Canvas2D(FigureCanvasQTAgg):
         # Ligne épaisse marquant la surface du sol
         self._ligne_sol, = self.axes.plot(
             [xmin, xmax], [GROUND_Y, GROUND_Y],
-            color="#388e3c", linewidth=2.5, zorder=1
+            color="#2ea0ff", linewidth=2.5, zorder=1
         )
 
     # ── Gravité ──────────────────────────────────────────────
@@ -287,7 +289,7 @@ class Canvas2D(FigureCanvasQTAgg):
 
         patch = Rectangle(
             (x_depart, y_depart), largeur, hauteur,
-            facecolor="#bbdefb", edgecolor="#1565c0",
+            facecolor="#9ec8ff", edgecolor="#2ea0ff",
             linewidth=1.8, zorder=5, alpha=0.9
         )
         self.axes.add_patch(patch)
@@ -658,23 +660,20 @@ class PanneauControle(QFrame):
 
     def _construire_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         # Bouton pour basculer en mode 3D
         # Le signal clicked sera branché par MaterialSimulationApp
-        self.btn_switch_3d = QPushButton("🧊  Passer en mode 3D")
-        self.btn_switch_3d.setStyleSheet(
-            "background-color: #ef6c00; color: white; font-size: 12px; padding: 8px;"
-        )
+        self.btn_switch_3d = QPushButton("Passer en mode 3D")
+        self.btn_switch_3d.setProperty("variant", "launch")
         layout.addWidget(self.btn_switch_3d)
 
         # ── Gravité ──
         grp_gravite = QGroupBox("Simulation physique")
         lay_grav    = QVBoxLayout(grp_gravite)
 
-        self.chk_gravite = QCheckBox("🌍  Activer la gravité")
-        self.chk_gravite.setStyleSheet("font-weight: bold; font-size: 11px;")
+        self.chk_gravite = QCheckBox("Activer la gravité")
         self.chk_gravite.toggled.connect(self._toggle_gravite)
         lay_grav.addWidget(self.chk_gravite)
 
@@ -683,7 +682,7 @@ class PanneauControle(QFrame):
             "tombent et s'empilent sur les autres.\n"
             "Les blocs ne peuvent pas se traverser."
         )
-        info_gravite.setStyleSheet("color: #555; font-size: 8px;")
+        info_gravite.setStyleSheet("color: #9eb4d9; font-size: 10px;")
         lay_grav.addWidget(info_gravite)
 
         grp_gravite.setLayout(lay_grav)
@@ -711,7 +710,7 @@ class PanneauControle(QFrame):
         grp_nouveau.setLayout(form_nouveau)
         lay_blocs.addWidget(grp_nouveau)
 
-        btn_ajouter = QPushButton("➕  Ajouter bloc")
+        btn_ajouter = QPushButton("Ajouter bloc")
         btn_ajouter.clicked.connect(self._ajouter_bloc)
         lay_blocs.addWidget(btn_ajouter)
 
@@ -721,7 +720,8 @@ class PanneauControle(QFrame):
         self.liste_blocs.setMaximumHeight(150)
         self.liste_blocs.currentRowChanged.connect(self._selectionner_bloc)
         lay_liste.addWidget(self.liste_blocs)
-        btn_supprimer = QPushButton("🗑  Supprimer sélectionné")
+        btn_supprimer = QPushButton("Supprimer sélectionné")
+        btn_supprimer.setProperty("variant", "danger")
         btn_supprimer.clicked.connect(self._supprimer_bloc)
         lay_liste.addWidget(btn_supprimer)
         grp_liste.setLayout(lay_liste)
@@ -748,7 +748,8 @@ class PanneauControle(QFrame):
         grp_charges.setLayout(form_charges)
         lay_charges.addWidget(grp_charges)
 
-        btn_appliquer = QPushButton("✅  Appliquer charges")
+        btn_appliquer = QPushButton("Appliquer charges")
+        btn_appliquer.setProperty("variant", "launch")
         btn_appliquer.clicked.connect(self._appliquer_charges)
         lay_charges.addWidget(btn_appliquer)
         lay_charges.addStretch()
@@ -763,7 +764,7 @@ class PanneauControle(QFrame):
         self.lbl_resultats = QLabel("—")
         self.lbl_resultats.setWordWrap(True)
         self.lbl_resultats.setTextFormat(Qt.TextFormat.RichText)
-        self.lbl_resultats.setStyleSheet("font-family: Consolas; font-size: 9px; color: #222;")
+        self.lbl_resultats.setStyleSheet("font-family: Consolas; font-size: 9px; color: #dbe8ff;")
 
         zone_scroll = QScrollArea()
         zone_scroll.setWidget(self.lbl_resultats)
@@ -774,16 +775,26 @@ class PanneauControle(QFrame):
         layout.addWidget(grp_resultats)
 
         self.setStyleSheet("""
-            QFrame        { background: #06080c; }
+            QFrame        { background: #050607; }
             QGroupBox     { color: #dbe8ff; border: 1px solid #223753; margin-top: 8px;
                             padding-top: 6px; border-radius: 6px; font-weight: bold; }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; color: #9ec8ff; }
             QLabel        { color: #dbe8ff; }
             QDoubleSpinBox{ background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72;
                             border-radius: 4px; padding: 2px; }
-            QPushButton   { background: #0d8bff; color: white; border: none;
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                background: #101a29;
+                border-left: 1px solid #2f4d72;
+            }
+            QPushButton   { background: #0d8bff; color: #ffffff; border: none;
                             border-radius: 6px; padding: 7px; font-weight: bold; }
             QPushButton:hover { background: #2c9bff; }
+            QPushButton[variant="secondary"] { background: #0d8bff; color: #ffffff; border: none; }
+            QPushButton[variant="secondary"]:hover { background: #2c9bff; }
+            QPushButton[variant="danger"] { background: #9b2432; color: #ffffff; border: none; }
+            QPushButton[variant="danger"]:hover { background: #b12b3a; }
+            QPushButton[variant="launch"] { background: #e67e22; color: #ffffff; border: none; }
+            QPushButton[variant="launch"]:hover { background: #f08f35; }
             QListWidget   { background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72; }
             QComboBox     { background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72;
                             border-radius: 4px; padding: 2px; }
@@ -791,6 +802,7 @@ class PanneauControle(QFrame):
             QTabBar::tab  { background: #101a29; color: #bcd6ff; padding: 6px 14px; }
             QTabBar::tab:selected { background: #17253a; color: #eaf2ff; font-weight: bold; }
             QScrollArea   { border: none; background: #0a1018; }
+            QScrollArea > QWidget > QWidget { background: #0a1018; }
             QCheckBox     { color: #9ec8ff; }
         """)
 
@@ -859,6 +871,7 @@ class MaterialSimulationApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Tensor Build — Simulateur de Résistance des Matériaux")
         self.resize(1400, 900)
+        self.setStyleSheet("QMainWindow { background: #050607; color: #eaf2ff; }")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -879,9 +892,23 @@ class MaterialSimulationApp(QMainWindow):
             self.panneau.btn_switch_3d.clicked.connect(switch_callback)
 
         dock = QDockWidget("Contrôles", self)
+        dock.setObjectName("controlsDock")
         dock.setWidget(self.panneau)
         dock.setMinimumWidth(320)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        dock.setStyleSheet("""
+            QDockWidget {
+                color: #dbe8ff;
+                font-weight: 700;
+                border-left: 1px solid #223753;
+            }
+            QDockWidget::title {
+                background: #0a1018;
+                text-align: left;
+                padding: 8px;
+                border-bottom: 1px solid #223753;
+            }
+        """)
 
     def _on_changed(self):
         """Appelé à chaque modification : recalcule et redessine."""

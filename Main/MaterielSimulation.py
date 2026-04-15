@@ -1,4 +1,5 @@
 import sys
+import time
 import numpy as np
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
@@ -28,7 +29,7 @@ class MaterielSimulationApp(QMainWindow):
 
         # Zone 3D (gauche)
         scene.plotter = SafeQtInteractor(scene.central_widget)
-        scene.plotter.set_background("white")
+        scene.plotter.set_background("#0a1018")
         scene.plotter.add_axes()
         scene.sol = Sol(scene.plotter)
         scene.sol.afficher()
@@ -40,7 +41,7 @@ class MaterielSimulationApp(QMainWindow):
         scene.plotter.add_key_event("s", lambda: scene.camera.pan("bas"))
         scene.plotter.add_key_event("a", lambda: scene.camera.pan("gauche"))
         scene.plotter.add_key_event("d", lambda: scene.camera.pan("droite"))
-        scene.gravite = Gravite(g=9.81)
+        scene.gravite = Gravite()
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
         # Panneau de contrôle (droite)
@@ -77,6 +78,18 @@ class MaterielSimulationApp(QMainWindow):
                 font-weight: bold;
             }
             QPushButton:hover { background: #2c9bff; }
+            QPushButton[variant="secondary"] {
+                background: #0d8bff;
+                color: #ffffff;
+                border: none;
+            }
+            QPushButton[variant="secondary"]:hover { background: #2c9bff; }
+            QPushButton[variant="danger"] { background: #9b2432; color: #ffffff; border: none; }
+            QPushButton[variant="danger"]:hover { background: #b12b3a; }
+            QPushButton[variant="success"] { background: #2e7d32; color: #ffffff; border: none; }
+            QPushButton[variant="success"]:hover { background: #3f9144; }
+            QPushButton[variant="launch"] { background: #e67e22; color: #ffffff; border: none; }
+            QPushButton[variant="launch"]:hover { background: #f08f35; }
         """)
 
         # Liste d'objets Forme
@@ -91,10 +104,8 @@ class MaterielSimulationApp(QMainWindow):
 
     def setup_ui_controls(scene):
         # --- Retour mode 2D ---
-        scene.btn_switch_2d = QPushButton("🖥️  Retourner en mode 2D")
-        scene.btn_switch_2d.setStyleSheet(
-            "background-color: #1565c0; color: white; font-size: 12px; padding: 8px;"
-        )
+        scene.btn_switch_2d = QPushButton("Retourner en mode 2D")
+        scene.btn_switch_2d.setProperty("variant", "launch")
         if scene.switch_callback is not None:
             scene.btn_switch_2d.clicked.connect(scene.switch_callback)
         else:
@@ -175,9 +186,8 @@ class MaterielSimulationApp(QMainWindow):
         scene.control_layout.addWidget(group_mat)
 
         # --- Simulation ---
-        scene.btn_sim = QPushButton("Lancer Simulation (Calcul SciPy)")
-        scene.btn_sim.setStyleSheet(
-            "background-color: #ffcccc; font-weight: bold; padding: 10px;")
+        scene.btn_sim = QPushButton("Lancer simulation")
+        scene.btn_sim.setProperty("variant", "success")
         scene.btn_sim.clicked.connect(scene.run_dummy_simulation)
         scene.control_layout.addWidget(scene.btn_sim)
 
@@ -187,8 +197,7 @@ class MaterielSimulationApp(QMainWindow):
 
         scene.btn_erase = QPushButton("Mode Effacer : OFF")
         scene.btn_erase.setCheckable(True)
-        scene.btn_erase.setStyleSheet(
-            "background-color: #dddddd; font-weight: bold; padding: 8px;")
+        scene.btn_erase.setProperty("variant", "secondary")
         scene.btn_erase.toggled.connect(scene.toggle_erase_mode)
         layout_erase.addWidget(scene.btn_erase)
 
@@ -204,14 +213,12 @@ class MaterielSimulationApp(QMainWindow):
         layout_resistance = QVBoxLayout()
 
         scene.btn_resistance = QPushButton("Afficher les contraintes")
-        scene.btn_resistance.setStyleSheet(
-            "background-color: #cce5ff; font-weight: bold; padding: 8px;")
+        scene.btn_resistance.setProperty("variant", "secondary")
         scene.btn_resistance.clicked.connect(scene.afficher_resistance)
         layout_resistance.addWidget(scene.btn_resistance)
 
         scene.btn_resistance_reset = QPushButton("Réinitialiser les couleurs")
-        scene.btn_resistance_reset.setStyleSheet(
-            "background-color: #dddddd; font-weight: bold; padding: 8px;")
+        scene.btn_resistance_reset.setProperty("variant", "secondary")
         scene.btn_resistance_reset.clicked.connect(scene.reinitialiser_couleurs)
         layout_resistance.addWidget(scene.btn_resistance_reset)
 
@@ -224,8 +231,7 @@ class MaterielSimulationApp(QMainWindow):
 
         scene.btn_inspect = QPushButton("Mode Inspecter : OFF")
         scene.btn_inspect.setCheckable(True)
-        scene.btn_inspect.setStyleSheet(
-            "background-color: #dddddd; font-weight: bold; padding: 8px;")
+        scene.btn_inspect.setProperty("variant", "secondary")
         scene.btn_inspect.toggled.connect(scene.toggle_inspect_mode)
         layout_inspect.addWidget(scene.btn_inspect)
 
@@ -388,50 +394,71 @@ class MaterielSimulationApp(QMainWindow):
         rapport = scene.gravite.rapport_complet(scene.objects, mat_name)
         QMessageBox.information(scene, "Simulation", rapport)
 
-        # Anime la chute de toutes les formes
-        for forme in scene.objects:
-            scene.animer_chute(forme)
+        # Anime la chute de toutes les formes avec une boucle à FPS stable.
+        scene.animer_chute(scene.objects)
 
-    def animer_chute(scene, forme):
-        import time
-
+    def animer_chute(scene, formes):
         mat_name = scene.selecteur_materiaux.currentText()
-        masse = scene.gravite.calculer_masse(forme, mat_name)  # kg
         g = scene.gravite.g  # utilise le g de l'objet Gravite
+        target_fps = 60.0
+        dt = 1.0 / target_fps
 
-        z_actuel = forme.params["centre"][2]
-        z_sol = -10.0 + forme.r
-        nb_frames = 100
-        dt = 0.05
-        vitesse_z = 0.0
+        etats = []
+        for forme in formes:
+            etats.append({
+                "forme": forme,
+                "masse": scene.gravite.calculer_masse(forme, mat_name),
+                "z": forme.params["centre"][2],
+                "z_sol": -10.0 + forme.r,
+                "vitesse_z": 0.0,
+                "termine": False,
+            })
 
-        for i in range(nb_frames):
-            vitesse_z += g * dt
-            z_nouv = z_actuel - vitesse_z * dt
-            z_actuel = z_nouv
+        impacts = []
+        while not all(etat["termine"] for etat in etats):
+            frame_start = time.perf_counter()
 
-            if z_nouv <= z_sol:
-                z_nouv = z_sol
+            for etat in etats:
+                if etat["termine"]:
+                    continue
 
-            forme.params["centre"] = (
-                forme.params["centre"][0],
-                forme.params["centre"][1],
-                z_nouv
-            )
-            scene.dessiner_forme(forme)
+                forme = etat["forme"]
+                etat["vitesse_z"] += g * dt
+                nouvelle_z = etat["z"] - etat["vitesse_z"] * dt
+
+                if nouvelle_z <= etat["z_sol"]:
+                    nouvelle_z = etat["z_sol"]
+                    etat["termine"] = True
+                    energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)  # E = 1/2 m v^2
+                    impacts.append((forme.NOM, etat["masse"], energie))
+
+                dz = nouvelle_z - etat["z"]
+                etat["z"] = nouvelle_z
+                forme.params["centre"] = (
+                    forme.params["centre"][0],
+                    forme.params["centre"][1],
+                    nouvelle_z,
+                )
+
+                # Déplacement léger de la géométrie en place (évite remove/add mesh à chaque frame).
+                if forme.mesh is not None:
+                    forme.mesh.translate((0.0, 0.0, dz), inplace=True)
+                else:
+                    scene.dessiner_forme(forme)
+
             scene.plotter.render()
-            time.sleep(0.000001)
+            QApplication.processEvents()
 
-            if z_nouv <= z_sol:
-                break
+            reste = dt - (time.perf_counter() - frame_start)
+            if reste > 0:
+                time.sleep(reste)
 
-        # afficher l'énergie d'impact
-        energie = 0.5 * masse * vitesse_z ** 2  # E = ½mv²
-        QMessageBox.information(
-            scene,
-            "Impact",
-            f"{forme.NOM}\nMasse : {masse:.2f} kg\nÉnergie d'impact : {energie:.2f} J"
-        )
+        if impacts:
+            lignes = [
+                f"{nom} — Masse : {masse:.2f} kg | Énergie d'impact : {energie:.2f} J"
+                for nom, masse, energie in impacts
+            ]
+            QMessageBox.information(scene, "Impact", "\n".join(lignes))
 
     # ------------------------------------------------------------------ #
     #  Mode Effacer                                                        #
@@ -440,8 +467,7 @@ class MaterielSimulationApp(QMainWindow):
     def toggle_erase_mode(scene, active):
         if active:
             scene.btn_erase.setText("Mode Effacer : ON")
-            scene.btn_erase.setStyleSheet(
-                "background-color: #ff6666; color: white; font-weight: bold; padding: 8px;")
+            scene.btn_erase.setProperty("variant", "danger")
             scene.erase_label.setVisible(True)
             scene.plotter.enable_mesh_picking(
                 callback=scene.on_pick,
@@ -452,10 +478,11 @@ class MaterielSimulationApp(QMainWindow):
             )
         else:
             scene.btn_erase.setText("Mode Effacer : OFF")
-            scene.btn_erase.setStyleSheet(
-                "background-color: #dddddd; font-weight: bold; padding: 8px;")
+            scene.btn_erase.setProperty("variant", "secondary")
             scene.erase_label.setVisible(False)
             scene.plotter.disable_picking()
+        scene.style().unpolish(scene.btn_erase)
+        scene.style().polish(scene.btn_erase)
 
     def on_pick(scene, picked_mesh):
         if picked_mesh is None:
@@ -508,8 +535,7 @@ class MaterielSimulationApp(QMainWindow):
     def toggle_inspect_mode(scene, active):
         if active:
             scene.btn_inspect.setText("Mode Inspecter : ON")
-            scene.btn_inspect.setStyleSheet(
-                "background-color: #66bb66; color: white; font-weight: bold; padding: 8px;")
+            scene.btn_inspect.setProperty("variant", "success")
             scene.plotter.enable_mesh_picking(
                 callback=scene.on_inspect,
                 use_mesh=True,
@@ -519,9 +545,10 @@ class MaterielSimulationApp(QMainWindow):
             )
         else:
             scene.btn_inspect.setText("Mode Inspecter : OFF")
-            scene.btn_inspect.setStyleSheet(
-                "background-color: #dddddd; font-weight: bold; padding: 8px;")
+            scene.btn_inspect.setProperty("variant", "secondary")
             scene.plotter.disable_picking()
+        scene.style().unpolish(scene.btn_inspect)
+        scene.style().polish(scene.btn_inspect)
 
 
     def on_inspect(scene, picked_mesh):
