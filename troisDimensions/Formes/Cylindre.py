@@ -1,4 +1,4 @@
-from Formes.Forme import Forme
+from .Forme import Forme
 import pyvista as pv
 
 class Cylindre(Forme):
