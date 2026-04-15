@@ -17,7 +17,7 @@ _MAIN_DIR = Path(__file__).resolve().parent / "Main"
 if str(_MAIN_DIR) not in sys.path:
     sys.path.insert(0, str(_MAIN_DIR))
 
-from MaterielSimulation import MaterielSimulationApp as App3D
+from Main.MaterielSimulation import MaterielSimulationApp as App3D
 
 
 class MenuDialog(QDialog):
