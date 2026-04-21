@@ -286,6 +286,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 "patch": patch,
                 "material": materiau,
                 "density": densite,
+                "h0": hauteur, 
                 "edgecolor": ec,
                 "ext_force": 0.0,
                 "moment": 0.0,
@@ -393,6 +394,8 @@ class Canvas2D(FigureCanvasQTAgg):
         Couche contraintes : carte de pression (Pa) ou barres RdYlGn selon sigma.
         Joints cliquables, effort affiche.
         """
+        # Configuration de l'animation
+        VISUAL_SCALE = 5000.0 
         _vider_serie_artists(self._images_chaleur)
 
         for p in self._patches_stress:
@@ -439,6 +442,12 @@ class Canvas2D(FigureCanvasQTAgg):
         for bloc, stress in zip(self.blocs, donnees_stress):
             if stress is None:
                 continue
+
+            h0 = bloc["h0"]
+            dh = stress.get("delta_h", 0.0)
+
+            nouveau_h = max(0.01, h0 - (dh*VISUAL_SCALE))
+            bloc["patch"].set_height(nouveau_h)
 
             x, y, w, h = _geom_patch(bloc)
 

@@ -59,8 +59,7 @@ PANEL_QSS = """
                     padding-top:6px; border-radius:4px; font-weight:bold; }
     QGroupBox::title { subcontrol-origin:margin; left:8px; }
     QLabel        { color:#333; }
-    QDoubleSpinBox{ background:white; color:#222; border:1px solid #90caf9;
-                    border-radius:3px; padding:2px; }
+
     QPushButton   { background:#1565c0; color:white; border:none;
                     border-radius:4px; padding:7px; font-weight:bold; }
     QPushButton:hover { background:#1976d2; }
@@ -189,7 +188,7 @@ class PanneauControle(QFrame):
         self.spin_force = QDoubleSpinBox()
         self.spin_force.setRange(0, 1e7)
         self.spin_force.setSuffix(" N")
-        self.spin_force.setSingleStep(100)
+        self.spin_force.setSingleStep(10000)
         self.spin_pression = QDoubleSpinBox()
         self.spin_pression.setRange(0, 1e6)
         self.spin_pression.setSuffix(" Pa")
@@ -198,6 +197,9 @@ class PanneauControle(QFrame):
         self.spin_moment.setRange(-1e6, 1e6)
         self.spin_moment.setSuffix(" N·m")
         self.spin_moment.setSingleStep(100)
+        self.spin_force.valueChanged.connect(self._appliquer_charges)
+        self.spin_pression.valueChanged.connect(self._appliquer_charges)
+        self.spin_moment.valueChanged.connect(self._appliquer_charges)
 
         form_charges.addRow("Force ponctuelle:", self.spin_force)
         form_charges.addRow("Pression dist.:", self.spin_pression)
@@ -288,9 +290,16 @@ class PanneauControle(QFrame):
             bloc["ext_force"] = self.spin_force.value()
             bloc["pressure"] = self.spin_pression.value()
             bloc["moment"] = self.spin_moment.value()
-            self.callback_physique()
+            self.callback_physique(refresh_list=False)
+
 
     def rafraichir_liste(self):
+        # 1. On mémorise la sélection actuelle
+        mem_ligne = self.liste_blocs.currentRow()
+        
+        # 2. On empêche la liste d'envoyer le signal de désélection pendant qu'on la vide
+        self.liste_blocs.blockSignals(True)
+        
         self.liste_blocs.clear()
         for i, bloc in enumerate(self.canvas.blocs):
             patch = bloc["patch"]
@@ -300,6 +309,14 @@ class PanneauControle(QFrame):
             item.setSizeHint(row.sizeHint())
             self.liste_blocs.addItem(item)
             self.liste_blocs.setItemWidget(item, row)
+            
+        # 3. On réactive les signaux
+        self.liste_blocs.blockSignals(False)
+        
+        # 4. On restaure la sélection
+        if 0 <= mem_ligne < self.liste_blocs.count():
+            self.liste_blocs.setCurrentRow(mem_ligne)
+            self._bloc_selectionne = mem_ligne
 
     def afficher_cdgr(self, html):
         self.lbl_cdgr.setText(html)
