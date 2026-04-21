@@ -192,6 +192,7 @@ def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
 
         poids = bloc["density"] * aire * GRAVITY
         f_ext = bloc["ext_force"]
+        f_ext_x = bloc.get("ext_force_x", 0.0)  # force horizontale externe
         f_pression = bloc["pressure"] * w
 
         f_contact = sum(
@@ -201,15 +202,29 @@ def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
         f_axial = poids + f_ext + f_pression + f_contact
         sigma_axial = f_axial / aire
 
+        tau = f_ext_x/ aire  # contrainte de cisaillement horizontale
+
         moment = bloc["moment"]
         i_local = (w * h**3) / 12
         sig_haut = moment * (h / 2) / i_local if i_local > 0 else 0
         sig_bas = moment * (-h / 2) / i_local if i_local > 0 else 0
+
         sigma_max = max(abs(sigma_axial + sig_haut), abs(sigma_axial + sig_bas))
 
+        sigma_eq = (sigma_max**2 + 3 * tau**2)**0.5  # contrainte équivalente de von Mises
+
         sigma_y = mat["sigma_y"]
-        taux = sigma_max / sigma_y * 100
+        taux = sigma_eq / sigma_y * 100
         statut, sym = _statut_utilisation(taux)
+
+        #Recuperer les proprietes du materiau
+        E = mat["E"]
+        nu = 0.3  # coefficient de Poisson (hypothese)
+        G = E / (2 * (1 + nu))  # module de cisail
+
+        #Calcul des deformations
+        delta_h = (f_axial * h) / (E * aire)  # deformation axiale
+        delta_x = (f_ext_x * h) / (G * aire)  # deformation de cisaillement
 
         resumes.append(
             f"  Bloc <b>{i + 1}</b> ({bloc['material']}) : "
@@ -248,6 +263,8 @@ def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
                 "pressure": bloc["pressure"],
                 "utilization": taux,
                 "F_axial": f_axial,
+                "delta_h": delta_h,
+                "delta_x": delta_x,
             }
         )
 
