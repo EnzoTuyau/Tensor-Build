@@ -1,6 +1,6 @@
 from troisDimensions.app.MaterielSimulation import MaterielSimulationApp as App3D
 from deuxDimensions.app.tensor2d import MaterialSimulationApp as App2D
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -201,14 +201,20 @@ class GestionnaireApplication:
         self.current_window = App2D(mode="2D", switch_callback=self.open_3d)
         self.current_window.show()
         if old:
-            old.close()
+            # Cacher l’ancienne (VTK ou matplotlib) + traiter la file d’événements
+            # avant de détruire : sinon conflit de contexte GL (segfault fréquent sur macOS).
+            old.hide()
+            QApplication.processEvents()
+            QTimer.singleShot(0, old.close)
 
     def open_3d(self):
         old = self.current_window
         self.current_window = App3D(switch_callback=self.open_2d)
         self.current_window.show()
         if old:
-            old.close()
+            old.hide()
+            QApplication.processEvents()
+            QTimer.singleShot(0, old.close)
 
 
 if __name__ == "__main__":

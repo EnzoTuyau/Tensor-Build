@@ -30,7 +30,8 @@ class MaterielSimulationApp(QMainWindow):
         scene.layout = QHBoxLayout(scene.central_widget)
 
         # Zone 3D (gauche)
-        scene.plotter = SafeQtInteractor(scene.central_widget)
+        # auto_update=False : sinon QTimer périodique + fermeture = race OpenGL/VTK (macOS).
+        scene.plotter = SafeQtInteractor(scene.central_widget, auto_update=False)
         scene.plotter.set_background("#0a1018")
         scene.plotter.add_axes()
         scene.sol = Sol(scene.plotter)
@@ -101,6 +102,21 @@ class MaterielSimulationApp(QMainWindow):
         scene._resize_drag_last_y = None
         scene.plotter.interactor.installEventFilter(scene)
         scene._refresh_action_buttons()
+
+    def closeEvent(self, event):
+        # Fermer explicitement le QtInteractor (render_timer, BasePlotter, QVTK) avant
+        # que Qt ne détruisse l’arbre de widgets : sinon segfault en changeant de mode.
+        if hasattr(self, "plotter") and self.plotter is not None:
+            try:
+                self.plotter.interactor.removeEventFilter(self)
+            except RuntimeError:
+                pass
+            try:
+                if not getattr(self.plotter, "_closed", False):
+                    self.plotter.close()
+            except RuntimeError:
+                pass
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------ #
     #  UI                                                                  #
