@@ -205,7 +205,7 @@ class GestionnaireApplication:
 
     def open_3d(self):
         old = self.current_window
-        self.current_window = App3D()
+        self.current_window = App3D(switch_callback=self.open_2d)
         self.current_window.show()
         if old:
             old.close()
