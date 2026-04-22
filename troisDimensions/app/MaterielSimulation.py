@@ -92,6 +92,7 @@ class MaterielSimulationApp(QMainWindow):
             QPushButton[variant="success"]:hover { background: #3f9144; }
             QPushButton[variant="launch"] { background: #e67e22; color: #ffffff; border: none; }
             QPushButton[variant="launch"]:hover { background: #f08f35; }
+            QPushButton:disabled { background: #4d5662; color: #c3c8cf; }
         """)
 
         # Liste d'objets Forme
@@ -99,6 +100,7 @@ class MaterielSimulationApp(QMainWindow):
         scene._resize_drag_active = False
         scene._resize_drag_last_y = None
         scene.plotter.interactor.installEventFilter(scene)
+        scene._refresh_action_buttons()
 
     # ------------------------------------------------------------------ #
     #  UI                                                                  #
@@ -292,6 +294,7 @@ class MaterielSimulationApp(QMainWindow):
         forme.actor = scene.plotter.add_mesh(
             forme.mesh, color="yellow", show_edges=True, reset_camera=False)
         scene.camera.activer_suivi(forme.params["centre"])
+        scene._refresh_action_buttons()
 
     def dessiner_forme(scene, forme):
         scene.camera.sauvegarder()  # ← sauvegarde avant
@@ -506,7 +509,10 @@ class MaterielSimulationApp(QMainWindow):
             if forme.mesh is picked_mesh:
                 scene.plotter.remove_actor(forme.actor)
                 scene.objects.remove(forme)
+                if scene.forme_selectionnee is forme:
+                    scene.forme_selectionnee = None
                 break
+        scene._refresh_action_buttons()
 
     def afficher_resistance(scene):
         """Affiche la carte de contraintes sur toutes les formes."""
@@ -618,6 +624,33 @@ class MaterielSimulationApp(QMainWindow):
 
             scene.group_geo.setEnabled(True)
 
+    def _refresh_action_buttons(scene):
+        """Grise les boutons indisponibles tant qu'il n'y a pas d'objet."""
+        has_objects = len(scene.objects) > 0
+
+        if not has_objects:
+            if scene.btn_erase.isChecked():
+                scene.btn_erase.blockSignals(True)
+                scene.btn_erase.setChecked(False)
+                scene.btn_erase.blockSignals(False)
+                scene.btn_erase.setText("Mode Effacer : OFF")
+                scene.btn_erase.setProperty("variant", "secondary")
+                scene.erase_label.setVisible(False)
+
+            if scene.btn_inspect.isChecked():
+                scene.btn_inspect.blockSignals(True)
+                scene.btn_inspect.setChecked(False)
+                scene.btn_inspect.blockSignals(False)
+                scene.btn_inspect.setText("Mode Inspecter : OFF")
+                scene.btn_inspect.setProperty("variant", "secondary")
+
+            scene.plotter.disable_picking()
+
+        scene.btn_sim.setEnabled(has_objects)
+        scene.btn_erase.setEnabled(has_objects)
+        scene.btn_resistance.setEnabled(has_objects)
+        scene.btn_resistance_reset.setEnabled(has_objects)
+        scene.btn_inspect.setEnabled(has_objects)
 
 # ================================================================== #
 if __name__ == "__main__":
