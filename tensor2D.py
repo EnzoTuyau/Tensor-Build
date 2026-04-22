@@ -668,6 +668,7 @@ class PanneauControle(QFrame):
         self.callback_physique = callback_physique
         self._bloc_selectionne = None
         self._construire_ui()
+        self._mettre_a_jour_actions()
 
     def _construire_ui(self):
         layout = QVBoxLayout(self)
@@ -731,10 +732,10 @@ class PanneauControle(QFrame):
         self.liste_blocs.setMaximumHeight(150)
         self.liste_blocs.currentRowChanged.connect(self._selectionner_bloc)
         lay_liste.addWidget(self.liste_blocs)
-        btn_supprimer = QPushButton("Supprimer sélectionné")
-        btn_supprimer.setProperty("variant", "danger")
-        btn_supprimer.clicked.connect(self._supprimer_bloc)
-        lay_liste.addWidget(btn_supprimer)
+        self.btn_supprimer = QPushButton("Supprimer sélectionné")
+        self.btn_supprimer.setProperty("variant", "danger")
+        self.btn_supprimer.clicked.connect(self._supprimer_bloc)
+        lay_liste.addWidget(self.btn_supprimer)
         grp_liste.setLayout(lay_liste)
         lay_blocs.addWidget(grp_liste)
         lay_blocs.addStretch()
@@ -759,10 +760,10 @@ class PanneauControle(QFrame):
         grp_charges.setLayout(form_charges)
         lay_charges.addWidget(grp_charges)
 
-        btn_appliquer = QPushButton("Appliquer charges")
-        btn_appliquer.setProperty("variant", "launch")
-        btn_appliquer.clicked.connect(self._appliquer_charges)
-        lay_charges.addWidget(btn_appliquer)
+        self.btn_appliquer = QPushButton("Appliquer charges")
+        self.btn_appliquer.setProperty("variant", "launch")
+        self.btn_appliquer.clicked.connect(self._appliquer_charges)
+        lay_charges.addWidget(self.btn_appliquer)
         lay_charges.addStretch()
         onglets.addTab(tab_charges, "Charges")
 
@@ -806,6 +807,7 @@ class PanneauControle(QFrame):
             QPushButton[variant="danger"]:hover { background: #b12b3a; }
             QPushButton[variant="launch"] { background: #e67e22; color: #ffffff; border: none; }
             QPushButton[variant="launch"]:hover { background: #f08f35; }
+            QPushButton:disabled { background: #4d5662; color: #c3c8cf; }
             QListWidget   { background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72; }
             QComboBox     { background: #0f1723; color: #eaf2ff; border: 1px solid #2f4d72;
                             border-radius: 4px; padding: 2px; }
@@ -844,6 +846,7 @@ class PanneauControle(QFrame):
             self.spin_force.setValue(bloc["ext_force"])
             self.spin_pression.setValue(bloc["pressure"])
             self.spin_moment.setValue(bloc["moment"])
+        self._mettre_a_jour_actions()
 
     def _appliquer_charges(self):
         ligne = self._bloc_selectionne
@@ -857,14 +860,26 @@ class PanneauControle(QFrame):
     def rafraichir_liste(self):
         """Met à jour la liste des blocs dans le panneau."""
         self.liste_blocs.clear()
+        if not self.canvas.blocs:
+            self._bloc_selectionne = None
         for i, bloc in enumerate(self.canvas.blocs):
             p = bloc["patch"]
             self.liste_blocs.addItem(
                 f"[{i+1}] {bloc['material']}  {p.get_width():.1f} × {p.get_height():.1f} m"
             )
+        self._mettre_a_jour_actions()
 
     def afficher_resultats(self, html):
         self.lbl_resultats.setText(html)
+
+    def _mettre_a_jour_actions(self):
+        """Active seulement les actions possibles selon l'état courant."""
+        selection_valide = (
+            self._bloc_selectionne is not None and
+            0 <= self._bloc_selectionne < len(self.canvas.blocs)
+        )
+        self.btn_supprimer.setEnabled(selection_valide)
+        self.btn_appliquer.setEnabled(selection_valide)
 
 
 # ──────────────────────────────────────────────────────────────
