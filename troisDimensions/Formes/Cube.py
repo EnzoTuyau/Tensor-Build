@@ -1,5 +1,5 @@
 import pyvista as pv
-from Formes.Forme import Forme
+from .Forme import Forme
 
 class Cube(Forme):
     NOM = "Cube"

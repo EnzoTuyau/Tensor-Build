@@ -5,15 +5,17 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
 from PySide6.QtCore import QEvent
-from SafeQtInteractor import SafeQtInteractor
-from Formes import Cube, Cylindre, PoutreCarree, PrismeTriangulaire, Sphere, Vis
-from Environnement import Sol, Gravite
-from Camera import Camera
+from .SafeQtInteractor import SafeQtInteractor
+from .Camera import Camera
+from ..Environnement import Sol, Gravite
+from ..Formes import Cube, Cylindre, PoutreCarree, PrismeTriangulaire, Sphere, Vis
 
 FORMES_DISPONIBLES = {
     cls.NOM: cls
     for cls in [Cylindre, PoutreCarree, PrismeTriangulaire, Sphere, Cube, Vis]
 }
+
+
 class MaterielSimulationApp(QMainWindow):
 
     def __init__(scene, switch_callback=None):
@@ -114,7 +116,6 @@ class MaterielSimulationApp(QMainWindow):
             scene.btn_switch_2d.setEnabled(False)
         scene.control_layout.addWidget(scene.btn_switch_2d)
 
-
         # --- 1. Ajouter une forme ---
         group_add = QGroupBox("1. Ajouter une Pièce")
         layout_add = QVBoxLayout()
@@ -179,7 +180,8 @@ class MaterielSimulationApp(QMainWindow):
             "Plastique": (3e9, "lightblue"),
         }
         scene.selecteur_materiaux.addItems(scene.materials_db.keys())
-        scene.selecteur_materiaux.currentTextChanged.connect(scene.update_materiel)
+        scene.selecteur_materiaux.currentTextChanged.connect(
+            scene.update_materiel)
 
         layout_mat.addWidget(QLabel("Type de matériau :"))
         layout_mat.addWidget(scene.selecteur_materiaux)
@@ -240,16 +242,23 @@ class MaterielSimulationApp(QMainWindow):
         group_inspect.setLayout(layout_inspect)
         scene.control_layout.addWidget(group_inspect)
 
+        # --- 7. Position caméra ---
+        group_cam = QGroupBox("7. Position Caméra")
+        layout_cam = QVBoxLayout()
 
+        scene.label_cam_pos = QLabel("x=0, y=0, z=0")
+        layout_cam.addWidget(scene.label_cam_pos)
 
-        group_geo.setEnabled(False)  # ← grisé au départ
-        scene.group_geo = group_geo  # ← garde une référence
+        group_cam.setLayout(layout_cam)
+        scene.control_layout.addWidget(group_cam)
 
-        scene.shape_selector.currentIndexChanged.connect(scene.on_forme_choisie)
+        group_geo.setEnabled(False)  # grisé au départ
+        scene.group_geo = group_geo  # garde une référence
+
+        scene.shape_selector.currentIndexChanged.connect(
+            scene.on_forme_choisie)
 
         scene.control_layout.addStretch()  # toujours en dernier
-
-
 
     # ------------------------------------------------------------------ #
     #  Ajouter / Dessiner                                                  #
@@ -282,7 +291,8 @@ class MaterielSimulationApp(QMainWindow):
         # Garde le groupe dimensions actif et la forme surlignée
         scene.group_geo.setEnabled(True)
         scene.plotter.remove_actor(forme.actor)
-        forme.actor = scene.plotter.add_mesh(forme.mesh, color="yellow", show_edges=True, reset_camera=False)
+        forme.actor = scene.plotter.add_mesh(
+            forme.mesh, color="yellow", show_edges=True, reset_camera=False)
         scene.camera.activer_suivi(forme.params["centre"])
         scene._refresh_action_buttons()
 
@@ -561,7 +571,6 @@ class MaterielSimulationApp(QMainWindow):
         scene.style().unpolish(scene.btn_inspect)
         scene.style().polish(scene.btn_inspect)
 
-
     def on_inspect(scene, picked_mesh):
         if picked_mesh is None:
             return
@@ -574,7 +583,8 @@ class MaterielSimulationApp(QMainWindow):
                     mat_name = scene.selecteur_materiaux.currentText()
                     color = scene.materials_db[mat_name][1]
                     scene.plotter.remove_actor(f.actor)
-                    f.actor = scene.plotter.add_mesh(f.mesh, color=color, show_edges=True)
+                    f.actor = scene.plotter.add_mesh(
+                        f.mesh, color=color, show_edges=True)
 
                 scene.plotter.remove_actor(forme.actor)
                 forme.actor = scene.plotter.add_mesh(
@@ -641,9 +651,6 @@ class MaterielSimulationApp(QMainWindow):
         scene.btn_resistance.setEnabled(has_objects)
         scene.btn_resistance_reset.setEnabled(has_objects)
         scene.btn_inspect.setEnabled(has_objects)
-
-
-
 
 # ================================================================== #
 if __name__ == "__main__":
