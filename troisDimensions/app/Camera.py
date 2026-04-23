@@ -1,3 +1,6 @@
+import math
+
+
 class Camera:
     """Gère la position et le comportement de la caméra."""
 
@@ -52,7 +55,7 @@ class Camera:
     def suivre_objet(self, nouvelle_position_objet):
         """
         Déplace la caméra pour suivre l'objet.
-        Conserve le même offset entre caméra et objet.
+        Permet à la caméra de suivre l'objet.
         """
         if not self._suivi_actif or self._derniere_pos_objet is None:
             return
@@ -83,7 +86,7 @@ class Camera:
         """
         Déplace la caméra latéralement/verticalement sans changer l'angle.
         direction : 'haut', 'bas', 'gauche', 'droite'
-        pas       : distance de déplacement par appui
+        pas       : distance de déplacement click
         """
         cam_pos = list(self.plotter.camera.position)
         foc = list(self.plotter.camera.focal_point)
@@ -100,6 +103,39 @@ class Camera:
         elif direction == "droite":
             cam_pos[0] += pas
             foc[0] += pas
+
+        
+
+    def orbit_horizontal(self, angle_deg):
+        """
+        Tourne la caméra autour du focal point dans le plan XY (Z fixe).
+        angle_deg : degrés de rotation (positif = sens antihoraire)
+        """
+        cam_pos = self.plotter.camera.position
+        foc = self.plotter.camera.focal_point
+
+        # Offset caméra par rapport au focal point
+        dx = cam_pos[0] - foc[0]
+        dy = cam_pos[1] - foc[1]
+        # Z reste intact
+        z = cam_pos[2]
+
+        # Rotation dans le plan XY
+        angle_rad = math.radians(angle_deg)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        new_dx = dx * cos_a - dy * sin_a
+        new_dy = dx * sin_a + dy * cos_a
+
+        self.plotter.camera.position = (
+            foc[0] + new_dx,
+            foc[1] + new_dy,
+            z  # Z bloqué
+        )
+        self.plotter.camera.focal_point = foc  # focal point ne bouge pas
+        self.plotter.render()
+    
+    
 
         self.plotter.camera.position = tuple(cam_pos)
         self.plotter.camera.focal_point = tuple(foc)
