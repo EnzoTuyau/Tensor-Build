@@ -123,14 +123,14 @@ class MaterielSimulationApp(QMainWindow):
         group_geo = QGroupBox("2. Dimensions & Position")
         layout_geo = QFormLayout()
 
-        scene.spin_radius = QDoubleSpinBox()
+        scene.spin_radius.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         scene.spin_radius.setRange(0.1, 1000.0)
         scene.spin_radius.setValue(1.0)
         scene.spin_radius.setSingleStep(0.1)
         scene.spin_radius.valueChanged.connect(scene.update_current_shape)
         layout_geo.addRow("Rayon / Largeur :", scene.spin_radius)
 
-        scene.spin_length = QDoubleSpinBox()
+        scene.spin_length.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         scene.spin_length.setRange(0.1, 1000.0)
         scene.spin_length.setValue(5.0)
         scene.spin_length.valueChanged.connect(scene.update_current_shape)
