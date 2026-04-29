@@ -242,23 +242,9 @@ class MaterielSimulationApp(QMainWindow):
         group_inspect.setLayout(layout_inspect)
         scene.control_layout.addWidget(group_inspect)
 
-        # --- 7. Position caméra ---
-        group_cam = QGroupBox("7. Position Caméra")
-        layout_cam = QVBoxLayout()
+        
 
-        scene.label_cam_pos = QLabel("x=0, y=0, z=0")
-        layout_cam.addWidget(scene.label_cam_pos)
-
-        group_cam.setLayout(layout_cam)
-        scene.control_layout.addWidget(group_cam)
-
-        group_geo.setEnabled(False)  # grisé au départ
-        scene.group_geo = group_geo  # garde une référence
-
-        scene.shape_selector.currentIndexChanged.connect(
-            scene.on_forme_choisie)
-
-        scene.control_layout.addStretch()  # toujours en dernier
+        
 
     # ------------------------------------------------------------------ #
     #  Ajouter / Dessiner                                                  #
@@ -341,31 +327,29 @@ class MaterielSimulationApp(QMainWindow):
 
     def eventFilter(scene, obj, event):
         if obj is scene.plotter.interactor:
-            if event.type() == QEvent.MouseButtonPress and scene.forme_selectionnee is not None:
-                if event.button() == 1:  # clic gauche
+            # Clic DROIT pour redimensionner (libère le clic gauche pour la caméra)
+            if event.type() == QEvent.MouseButtonPress:
+                if event.button() == 2 and scene.forme_selectionnee is not None:
                     scene._resize_drag_active = True
                     scene._resize_drag_last_y = event.position().y()
                     return True
-            elif event.type() == QEvent.MouseMove and scene._resize_drag_active and scene.forme_selectionnee is not None:
+            elif event.type() == QEvent.MouseMove and scene._resize_drag_active:
                 y_now = event.position().y()
                 dy = scene._resize_drag_last_y - y_now
                 if abs(dy) >= 1:
                     facteur = 1.0 + (dy * 0.008)
                     facteur = max(0.2, min(5.0, facteur))
-
                     forme = scene.forme_selectionnee
                     new_r = max(0.1, forme.params["rayon"] * facteur)
                     new_l = max(0.1, forme.params["longueur"] * facteur)
                     forme.params["rayon"] = new_r
                     forme.params["longueur"] = new_l
-
                     scene.spin_radius.blockSignals(True)
                     scene.spin_length.blockSignals(True)
                     scene.spin_radius.setValue(new_r)
                     scene.spin_length.setValue(new_l)
                     scene.spin_radius.blockSignals(False)
                     scene.spin_length.blockSignals(False)
-
                     scene.dessiner_forme(forme)
                     scene.plotter.remove_actor(forme.actor)
                     forme.actor = scene.plotter.add_mesh(
@@ -707,6 +691,8 @@ class MaterielSimulationApp(QMainWindow):
         scene.btn_resistance.setEnabled(has_objects)
         scene.btn_resistance_reset.setEnabled(has_objects)
         scene.btn_inspect.setEnabled(has_objects)
+
+        scene.control_layout.addStretch()  # toujours en dernier pour pousser les boutons vers le haut
 
 # ================================================================== #
 if __name__ == "__main__":
