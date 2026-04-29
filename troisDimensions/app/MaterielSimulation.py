@@ -399,6 +399,45 @@ class MaterielSimulationApp(QMainWindow):
         # Anime la chute de toutes les formes avec une boucle à FPS stable.
         scene.animer_chute(scene.objects)
 
+    #---- Collision entre formes  ----#
+    def _detecter_collisions(scene, etats):
+
+        for i, etat_a in enumerate(etats):
+            for j, etat_b in enumerate(etats):
+                if i >= j:
+                    continue
+                
+                forme_a = etat_a["forme"]
+                forme_b = etat_b["forme"]
+                
+                cx_a, cy_a = forme_a.params["centre"][0], forme_a.params["centre"][1]
+                cx_b, cy_b = forme_b.params["centre"][0], forme_b.params["centre"][1]
+                
+                # Distance horizontale entre les deux formes
+                dist_horiz = ((cx_a - cx_b)**2 + (cy_a - cy_b)**2) ** 0.5
+                dist_min = forme_a.r + forme_b.r  # somme des rayons
+                
+                # Distance verticale entre bas de A et haut de B
+                bas_a = etat_a["z"] - forme_a.l / 2
+                haut_b = etat_b["z"] + forme_b.l / 2
+                bas_b = etat_b["z"] - forme_b.l / 2
+                haut_a = etat_a["z"] + forme_a.l / 2
+                
+                # Collision si chevauchement horizontal ET vertical
+                chevauchement_horiz = dist_horiz < dist_min
+                chevauchement_vert = bas_a < haut_b and haut_a > bas_b
+                
+                if chevauchement_horiz and chevauchement_vert:
+                    # Échange des vitesses (collision élastique simplifiée)
+                    m_a = etat_a["masse"]
+                    m_b = etat_b["masse"]
+                    v_a = etat_a["vitesse_z"]
+                    v_b = etat_b["vitesse_z"]
+                    
+                    # Conservation de la quantité de mouvement
+                    etat_a["vitesse_z"] = (v_a * (m_a - m_b) + 2 * m_b * v_b) / (m_a + m_b)
+                    etat_b["vitesse_z"] = (v_b * (m_b - m_a) + 2 * m_a * v_a) / (m_a + m_b)
+
         #------ Animation de la chute libre avec gestion du temps -----#
 
     def animer_chute(scene, formes):
@@ -407,7 +446,6 @@ class MaterielSimulationApp(QMainWindow):
         target_fps = 60.0
         dt_cible = 1.0 / target_fps
 
-        # ← Sauvegarde les positions initiales
         positions_initiales = {
             id(forme): forme.params["centre"]
             for forme in formes
@@ -426,6 +464,7 @@ class MaterielSimulationApp(QMainWindow):
 
         impacts = []
         dernier_t = time.perf_counter()
+
         while not all(etat["termine"] for etat in etats):
             frame_start = time.perf_counter()
             dt = min(0.05, frame_start - dernier_t)
@@ -433,10 +472,10 @@ class MaterielSimulationApp(QMainWindow):
                 dt = dt_cible
             dernier_t = frame_start
 
+            # Physique
             for etat in etats:
                 if etat["termine"]:
                     continue
-
                 forme = etat["forme"]
                 etat["vitesse_z"] += g * dt
                 nouvelle_z = etat["z"] - etat["vitesse_z"] * dt
@@ -444,6 +483,7 @@ class MaterielSimulationApp(QMainWindow):
                 if nouvelle_z <= etat["z_sol"]:
                     nouvelle_z = etat["z_sol"]
                     etat["termine"] = True
+                    etat["vitesse_z"] *= -0.3  # léger rebond
                     energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)
                     impacts.append((forme.NOM, etat["masse"], energie))
 
@@ -454,11 +494,45 @@ class MaterielSimulationApp(QMainWindow):
                     forme.params["centre"][1],
                     nouvelle_z,
                 )
-
                 if forme.mesh is not None:
                     forme.mesh.translate((0.0, 0.0, dz), inplace=True)
+
+            # Collisions forme-forme
+            scene._detecter_collisions(etats)
+
+            # Mise à jour contraintes en temps réel
+            for etat in etats:
+                forme = etat["forme"]
+                mesh = forme.mesh
+                if mesh is None:
+                    continue
+
+                points = mesh.points
+                masse = etat["masse"]
+                poids = masse * g
+                aire = 3.14159 * forme.r ** 2
+                contrainte_max = poids / aire
+
+                z_points = points[:, 2]
+                z_min, z_max = z_points.min(), z_points.max()
+                if z_max > z_min:
+                    z_norm = 1.0 - (z_points - z_min) / (z_max - z_min)
                 else:
-                    scene.dessiner_forme(forme)
+                    z_norm = np.ones(len(z_points))
+
+                # Boost de contrainte à l'impact
+                facteur_impact = 1.0 + abs(etat["vitesse_z"]) * 0.1
+                stress_values = (z_norm * contrainte_max * facteur_impact) / 1e6
+
+                scene.plotter.remove_actor(forme.actor)
+                forme.actor = scene.plotter.add_mesh(
+                    mesh,
+                    scalars=stress_values,
+                    cmap="coolwarm",
+                    show_edges=False,
+                    reset_camera=False,
+                    clim=[0, max(stress_values.max(), 0.001)]
+                )
 
             scene.plotter.render()
             QApplication.processEvents()
@@ -469,16 +543,16 @@ class MaterielSimulationApp(QMainWindow):
 
         if impacts:
             lignes = [
-                f"{nom} — Masse : {masse:.2f} kg | Énergie d'impact : {energie:.2f} J"
+                f"{nom} — {masse:.2f} kg | {energie:.2f} J"
                 for nom, masse, energie in impacts
             ]
             QMessageBox.information(scene, "Impact", "\n".join(lignes))
 
-        # ← Restaure les positions initiales après le popup
+        # Restaure positions et couleurs
         for forme in formes:
             pos_init = positions_initiales[id(forme)]
             forme.params["centre"] = pos_init
-            forme.mesh = None  # ← force la reconstruction complète du mesh
+            forme.mesh = None
             scene.dessiner_forme(forme)
 
     #---- méthodes pour la vue de résistance -----#
