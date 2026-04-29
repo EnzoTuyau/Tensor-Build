@@ -464,9 +464,8 @@ class MaterielSimulationApp(QMainWindow):
 
         impacts = []
         dernier_t = time.perf_counter()
-
         frame_count = 0
-        CONTRAINTES_INTERVAL = 5  # calcule contraintes 1 frame sur 5   
+        CONTRAINTES_INTERVAL = 5
 
         while not all(etat["termine"] for etat in etats):
             frame_start = time.perf_counter()
@@ -486,7 +485,7 @@ class MaterielSimulationApp(QMainWindow):
                 if nouvelle_z <= etat["z_sol"]:
                     nouvelle_z = etat["z_sol"]
                     etat["termine"] = True
-                    etat["vitesse_z"] *= -0.3  # léger rebond
+                    etat["vitesse_z"] *= -0.3
                     energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)
                     impacts.append((forme.NOM, etat["masse"], energie))
 
@@ -503,39 +502,36 @@ class MaterielSimulationApp(QMainWindow):
             # Collisions forme-forme
             scene._detecter_collisions(etats)
 
-        frame_count += 1
-        if frame_count % CONTRAINTES_INTERVAL == 0:
-            for etat in etats:
-                forme = etat["forme"]
-                mesh = forme.mesh
-                if mesh is None:
-                    continue
-
-                points = mesh.points
-                masse = etat["masse"]
-                poids = masse * g
-                aire = 3.14159 * forme.r ** 2
-                contrainte_max = poids / aire
-
-                z_points = points[:, 2]
-                z_min, z_max = z_points.min(), z_points.max()
-                if z_max > z_min:
-                    z_norm = 1.0 - (z_points - z_min) / (z_max - z_min)
-                else:
-                    z_norm = np.ones(len(z_points))
-
-                facteur_impact = 1.0 + abs(etat["vitesse_z"]) * 0.1
-                stress_values = (z_norm * contrainte_max * facteur_impact) / 1e6
-
-                scene.plotter.remove_actor(forme.actor)
-                forme.actor = scene.plotter.add_mesh(
-                    mesh,
-                    scalars=stress_values,
-                    cmap="coolwarm",
-                    show_edges=False,
-                    reset_camera=False,
-                    clim=[0, max(stress_values.max(), 0.001)]
-                )
+            # ← tout ce bloc DOIT être dans le while
+            frame_count += 1
+            if frame_count % CONTRAINTES_INTERVAL == 0:
+                for etat in etats:
+                    forme = etat["forme"]
+                    mesh = forme.mesh
+                    if mesh is None:
+                        continue
+                    points = mesh.points
+                    masse = etat["masse"]
+                    poids = masse * g
+                    aire = 3.14159 * forme.r ** 2
+                    contrainte_max = poids / aire
+                    z_points = points[:, 2]
+                    z_min, z_max = z_points.min(), z_points.max()
+                    if z_max > z_min:
+                        z_norm = 1.0 - (z_points - z_min) / (z_max - z_min)
+                    else:
+                        z_norm = np.ones(len(z_points))
+                    facteur_impact = 1.0 + abs(etat["vitesse_z"]) * 0.1
+                    stress_values = (z_norm * contrainte_max * facteur_impact) / 1e6
+                    scene.plotter.remove_actor(forme.actor)
+                    forme.actor = scene.plotter.add_mesh(
+                        mesh,
+                        scalars=stress_values,
+                        cmap="coolwarm",
+                        show_edges=False,
+                        reset_camera=False,
+                        clim=[0, max(stress_values.max(), 0.001)]
+                    )
 
             scene.plotter.render()
             QApplication.processEvents()
@@ -551,7 +547,6 @@ class MaterielSimulationApp(QMainWindow):
             ]
             QMessageBox.information(scene, "Impact", "\n".join(lignes))
 
-        # Restaure positions et couleurs
         for forme in formes:
             pos_init = positions_initiales[id(forme)]
             forme.params["centre"] = pos_init
