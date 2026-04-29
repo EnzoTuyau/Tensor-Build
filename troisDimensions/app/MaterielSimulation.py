@@ -414,9 +414,15 @@ class MaterielSimulationApp(QMainWindow):
 
     def animer_chute(scene, formes):
         mat_name = scene.selecteur_materiaux.currentText()
-        g = scene.gravite.g  # utilise le g de l'objet Gravite
+        g = scene.gravite.g
         target_fps = 60.0
         dt_cible = 1.0 / target_fps
+
+        # ← Sauvegarde les positions initiales
+        positions_initiales = {
+            id(forme): forme.params["centre"]
+            for forme in formes
+        }
 
         etats = []
         for forme in formes:
@@ -449,7 +455,7 @@ class MaterielSimulationApp(QMainWindow):
                 if nouvelle_z <= etat["z_sol"]:
                     nouvelle_z = etat["z_sol"]
                     etat["termine"] = True
-                    energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)  # K = 1/2 m v^2
+                    energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)
                     impacts.append((forme.NOM, etat["masse"], energie))
 
                 dz = nouvelle_z - etat["z"]
@@ -460,7 +466,6 @@ class MaterielSimulationApp(QMainWindow):
                     nouvelle_z,
                 )
 
-                # Déplacement léger de la géométrie en place (évite remove/add mesh à chaque frame).
                 if forme.mesh is not None:
                     forme.mesh.translate((0.0, 0.0, dz), inplace=True)
                 else:
@@ -479,6 +484,13 @@ class MaterielSimulationApp(QMainWindow):
                 for nom, masse, energie in impacts
             ]
             QMessageBox.information(scene, "Impact", "\n".join(lignes))
+
+        # ← Restaure les positions initiales après le popup
+        for forme in formes:
+            pos_init = positions_initiales[id(forme)]
+            forme.params["centre"] = pos_init
+            forme.mesh = None  # ← force la reconstruction complète du mesh
+            scene.dessiner_forme(forme)
 
     #---- méthodes pour la vue de résistance -----#
     
