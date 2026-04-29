@@ -7,6 +7,7 @@ from .SafeQtInteractor import SafeQtInteractor
 from .Camera import Camera
 from ..Environnement import Sol, Gravite
 from ..Formes import Cube, Cylindre, PoutreCarree, PrismeTriangulaire, Sphere, Vis
+from PySide6.QtCore import Qt
 
 FORMES_DISPONIBLES = {
     cls.NOM: cls
@@ -137,12 +138,15 @@ class MaterielSimulationApp(QMainWindow):
         layout_geo.addRow("Longueur :", scene.spin_length)
 
         scene.spin_x = QDoubleSpinBox()
+        scene.spin_x.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         scene.spin_x.setRange(-1000, 1000)
         scene.spin_x.valueChanged.connect(scene.update_current_shape)
         scene.spin_y = QDoubleSpinBox()
+        scene.spin_y.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         scene.spin_y.setRange(-1000, 1000)
         scene.spin_y.valueChanged.connect(scene.update_current_shape)
         scene.spin_z = QDoubleSpinBox()
+        scene.spin_z.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         scene.spin_z.setRange(-1000, 1000)
         scene.spin_z.valueChanged.connect(scene.update_current_shape)
 
