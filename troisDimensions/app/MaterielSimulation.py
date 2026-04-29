@@ -242,21 +242,7 @@ class MaterielSimulationApp(QMainWindow):
         group_inspect.setLayout(layout_inspect)
         scene.control_layout.addWidget(group_inspect)
 
-        # --- 7. Position caméra ---
-        group_cam = QGroupBox("7. Position Caméra")
-        layout_cam = QVBoxLayout()
-
-        scene.label_cam_pos = QLabel("x=0, y=0, z=0")
-        layout_cam.addWidget(scene.label_cam_pos)
-
-        group_cam.setLayout(layout_cam)
-        scene.control_layout.addWidget(group_cam)
-
-        group_geo.setEnabled(False)  # grisé au départ
-        scene.group_geo = group_geo  # garde une référence
-
-        scene.shape_selector.currentIndexChanged.connect(
-            scene.on_forme_choisie)
+        
 
         scene.control_layout.addStretch()  # toujours en dernier
 
