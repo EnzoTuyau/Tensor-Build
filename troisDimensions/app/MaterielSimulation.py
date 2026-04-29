@@ -465,6 +465,9 @@ class MaterielSimulationApp(QMainWindow):
         impacts = []
         dernier_t = time.perf_counter()
 
+        frame_count = 0
+        CONTRAINTES_INTERVAL = 5  # calcule contraintes 1 frame sur 5   
+
         while not all(etat["termine"] for etat in etats):
             frame_start = time.perf_counter()
             dt = min(0.05, frame_start - dernier_t)
@@ -500,7 +503,8 @@ class MaterielSimulationApp(QMainWindow):
             # Collisions forme-forme
             scene._detecter_collisions(etats)
 
-            # Mise à jour contraintes en temps réel
+        frame_count += 1
+        if frame_count % CONTRAINTES_INTERVAL == 0:
             for etat in etats:
                 forme = etat["forme"]
                 mesh = forme.mesh
@@ -520,7 +524,6 @@ class MaterielSimulationApp(QMainWindow):
                 else:
                     z_norm = np.ones(len(z_points))
 
-                # Boost de contrainte à l'impact
                 facteur_impact = 1.0 + abs(etat["vitesse_z"]) * 0.1
                 stress_values = (z_norm * contrainte_max * facteur_impact) / 1e6
 
@@ -558,7 +561,6 @@ class MaterielSimulationApp(QMainWindow):
     #---- méthodes pour la vue de résistance -----#
     
     def afficher_resistance(scene):
-        """Affiche la carte de contraintes basée sur la physique réelle."""
         if not scene.objects:
             return
 
