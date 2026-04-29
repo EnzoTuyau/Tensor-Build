@@ -234,7 +234,7 @@ class MaterielSimulationApp(QMainWindow):
         scene.control_layout.addWidget(group_inspect)
 
         # --- 7. Position caméra ---
-        group_cam = QGroupBox("7. Position Caméra")
+        group_cam = QGroupBox("7.ggn Caméra")
         layout_cam = QVBoxLayout()
 
         scene.label_cam_pos = QLabel("x=0, y=0, z=0")
@@ -249,7 +249,7 @@ class MaterielSimulationApp(QMainWindow):
         scene.shape_selector.currentIndexChanged.connect(
             scene.on_forme_choisie)
 
-        scene.control_layout.addStretch()  # toujours en dernier
+
 
     # ------------------------------------------------------------------ #
     #  Ajouter / Dessiner                                                  #
@@ -544,6 +544,8 @@ class MaterielSimulationApp(QMainWindow):
                 scene.forme_selectionnee = None
 
             scene.group_geo.setEnabled(True)
+
+        scene.control_layout.addStretch()  # toujours en dernier
 
 
 # ================================================================== #
