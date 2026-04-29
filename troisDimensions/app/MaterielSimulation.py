@@ -465,7 +465,7 @@ class MaterielSimulationApp(QMainWindow):
         impacts = []
         dernier_t = time.perf_counter()
         frame_count = 0
-        CONTRAINTES_INTERVAL = 5
+        CONTRAINTES_INTERVAL = 30  # calcul des contraintes tous les 30 frames
 
         while not all(etat["termine"] for etat in etats):
             frame_start = time.perf_counter()
@@ -502,7 +502,6 @@ class MaterielSimulationApp(QMainWindow):
             # Collisions forme-forme
             scene._detecter_collisions(etats)
 
-            # ← tout ce bloc DOIT être dans le while
             frame_count += 1
             if frame_count % CONTRAINTES_INTERVAL == 0:
                 for etat in etats:
