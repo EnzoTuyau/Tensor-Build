@@ -575,24 +575,7 @@ class MaterielSimulationApp(QMainWindow):
                 break
         scene._refresh_action_buttons()
 
-    def afficher_resistance(scene):
-        """Affiche la carte de contraintes sur toutes les formes."""
-        if not scene.objects:
-            return
-
-        for forme in scene.objects:
-            mesh = forme.mesh
-            stress_values = np.linspace(0, 100, mesh.n_points)
-
-            scene.plotter.remove_actor(forme.actor)
-            forme.actor = scene.plotter.add_mesh(
-                mesh,
-                scalars=stress_values,
-                cmap="jet",
-                show_edges=False
-            )
-
-        scene.plotter.add_scalar_bar(title="Contrainte de Von Mises (MPa)")
+    
 
     def reinitialiser_couleurs(scene):
         """Remet les couleurs originales du matériau sur toutes les formes."""
