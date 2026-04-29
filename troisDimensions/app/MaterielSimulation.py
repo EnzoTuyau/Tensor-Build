@@ -242,9 +242,7 @@ class MaterielSimulationApp(QMainWindow):
         group_inspect.setLayout(layout_inspect)
         scene.control_layout.addWidget(group_inspect)
 
-        
-
-        scene.control_layout.addStretch()  # toujours en dernier
+        #scene.control_layout.addStretch()  # toujours en dernier
 
     # ------------------------------------------------------------------ #
     #  Ajouter / Dessiner                                                  #
