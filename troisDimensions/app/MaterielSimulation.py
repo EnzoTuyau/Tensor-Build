@@ -410,6 +410,8 @@ class MaterielSimulationApp(QMainWindow):
         # Anime la chute de toutes les formes avec une boucle à FPS stable.
         scene.animer_chute(scene.objects)
 
+        #------ Animation de la chute libre avec gestion du temps -----#
+
     def animer_chute(scene, formes):
         mat_name = scene.selecteur_materiaux.currentText()
         g = scene.gravite.g  # utilise le g de l'objet Gravite
@@ -447,7 +449,7 @@ class MaterielSimulationApp(QMainWindow):
                 if nouvelle_z <= etat["z_sol"]:
                     nouvelle_z = etat["z_sol"]
                     etat["termine"] = True
-                    energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)  # E = 1/2 m v^2
+                    energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)  # K = 1/2 m v^2
                     impacts.append((forme.NOM, etat["masse"], energie))
 
                 dz = nouvelle_z - etat["z"]
@@ -477,6 +479,65 @@ class MaterielSimulationApp(QMainWindow):
                 for nom, masse, energie in impacts
             ]
             QMessageBox.information(scene, "Impact", "\n".join(lignes))
+
+    #---- méthodes pour la vue de résistance -----#
+    
+    def afficher_resistance(scene):
+        """Affiche la carte de contraintes basée sur la physique réelle."""
+        if not scene.objects:
+            return
+
+        mat_name = scene.selecteur_materiaux.currentText()
+
+        for forme in scene.objects:
+            mesh = forme.mesh
+            points = mesh.points  # tableau numpy (N, 3) des points du mesh
+
+            # --- Calcul physique ---
+            masse = scene.gravite.calculer_masse(forme, mat_name)
+            poids = masse * scene.gravite.g          # F = mg (N)
+            aire = 3.14159 * forme.r ** 2            # section transversale (m²)
+            contrainte_max = poids / aire            # σ = F/A (Pa)
+
+            # --- Distribution réaliste selon Z ---
+            # Plus bas dans l'objet = plus de contrainte (supporte le poids du dessus)
+            z_points = points[:, 2]
+            z_min = z_points.min()
+            z_max = z_points.max()
+
+            if z_max > z_min:
+                # Normalise Z : bas = 1.0 (max contrainte), haut = 0.0 (min contrainte)
+                z_norm = 1.0 - (z_points - z_min) / (z_max - z_min)
+            else:
+                z_norm = np.ones(len(z_points))
+
+            # Ajoute variation radiale : centre sous plus de compression que les bords
+            centre_x = points[:, 0].mean()
+            centre_y = points[:, 1].mean()
+            dist_radiale = np.sqrt(
+                (points[:, 0] - centre_x) ** 2 +
+                (points[:, 1] - centre_y) ** 2
+            )
+            r_max = dist_radiale.max() if dist_radiale.max() > 0 else 1.0
+            r_norm = 1.0 - (dist_radiale / r_max) * 0.3  # centre +30% de contrainte
+
+            # Contrainte finale en MPa
+            stress_values = (z_norm * r_norm * contrainte_max) / 1e6
+
+            scene.plotter.remove_actor(forme.actor)
+            forme.actor = scene.plotter.add_mesh(
+                mesh,
+                scalars=stress_values,
+                cmap="coolwarm",       # bleu = faible, rouge = élevé
+                show_edges=False,
+                reset_camera=False,
+                clim=[0, stress_values.max() if stress_values.max() > 0 else 1]
+            )
+
+        scene.plotter.add_scalar_bar(
+            title="Contrainte de compression (MPa)",
+            color="white"
+        )
 
     # ------------------------------------------------------------------ #
     #  Mode Effacer                                                        #
