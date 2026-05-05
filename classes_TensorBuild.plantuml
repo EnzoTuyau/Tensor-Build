@@ -1,0 +1,159 @@
+@startuml classes_TensorBuild
+set namespaceSeparator none
+class "Camera" as troisDimensions.app.Camera.Camera {
+  focal_point_initial : tuple
+  plotter
+  position_initiale : tuple
+  up_initial : tuple
+  activer_suivi(position_objet)
+  desactiver_suivi()
+  initialiser()
+  pan(direction, pas)
+  reset()
+  restaurer()
+  sauvegarder()
+  suivre_objet(nouvelle_position_objet)
+}
+class "Cube" as troisDimensions.Formes.Cube.Cube {
+  NOM : str
+  construire_mesh()
+}
+class "Cylindre" as troisDimensions.Formes.Cylindre.Cylindre {
+  NOM : str
+  construire_mesh()
+}
+class "Forme" as troisDimensions.Formes.Forme.Forme {
+  actor : NoneType
+  c
+  l
+  mesh : NoneType
+  params
+  r
+  {abstract}construire_mesh()
+}
+class "GestionnaireApplication" as menu.GestionnaireApplication {
+  current_window : MaterialSimulationApp, NoneType
+  open_2d()
+  open_3d()
+}
+class "Gravite" as troisDimensions.Environnement.Gravite.Gravite {
+  DENSITES : dict
+  g : float
+  calculer_masse(forme, materiau)
+  calculer_poids(forme, materiau)
+  rapport_complet(formes, materiau)
+}
+class "Materiau" as materiaux.Materiau {
+  PRESETS : dict
+  densite
+  limite_elastique
+  module_young
+  nom
+  poisson
+  depuis_preset(nom)
+}
+class "MaterielSimulationApp" as troisDimensions.app.MaterielSimulation.MaterielSimulationApp {
+  btn_add
+  btn_erase
+  btn_inspect
+  btn_resistance
+  btn_resistance_reset
+  btn_sim
+  btn_switch_2d
+  camera
+  central_widget
+  control_layout
+  control_panel
+  erase_label
+  forme_selectionnee : NoneType
+  gravite
+  group_geo
+  layout
+  materials_db : dict
+  objects : list
+  plotter : QtInteractor
+  selecteur_materiaux
+  shape_selector
+  sol
+  spin_length
+  spin_radius
+  spin_x
+  spin_y
+  spin_z
+  switch_callback : NoneType
+  add_shape()
+  afficher_resistance()
+  animer_chute(formes)
+  dessiner_forme(forme)
+  eventFilter(obj, event)
+  on_forme_choisie(index)
+  on_inspect(picked_mesh)
+  on_pick(picked_mesh)
+  reinitialiser_couleurs()
+  run_dummy_simulation()
+  setup_ui_controls()
+  toggle_erase_mode(active)
+  toggle_inspect_mode(active)
+  update_current_shape()
+  update_materiel()
+}
+class "MenuDialog" as menu.MenuDialog {
+  btn_2d : NoneType
+  btn_3d : NoneType
+  mode : NoneType, str
+  launch_2d()
+  launch_3d()
+}
+class "PoutreCarree" as troisDimensions.Formes.PoutreCarree.PoutreCarree {
+  NOM : str
+  construire_mesh()
+}
+class "PrismeTriangulaire" as troisDimensions.Formes.PrismeTriangulaire.PrismeTriangulaire {
+  NOM : str
+  construire_mesh()
+}
+class "SafeQtInteractor" as troisDimensions.app.SafeQtInteractor.SafeQtInteractor {
+  paintEvent(ev)
+}
+class "Sol" as troisDimensions.Environnement.Sol.Sol {
+  actor : NoneType
+  couleur : str
+  hauteur : float
+  opacite : float
+  plotter
+  taille : int
+  afficher()
+  masquer()
+}
+class "Sphere" as troisDimensions.Formes.Sphere.Sphere {
+  NOM : str
+  construire_mesh()
+}
+class "Tensor2DPhysique" as Tensor2DPhysique.Tensor2DPhysique {
+  calculer_contraintes(blocs)
+  charge_verticale(bloc)
+  contact_pairs(blocs, tol)
+  geom(bloc)
+  hauteur_appui_max(blocs, idx)
+  overlaps_x(bloc_a, bloc_b)
+  resoudre_collision(idx_mobile, blocs)
+  statistiques_section(blocs)
+  statut_utilisation(util_pct)
+  von_mises(sigma_x, sigma_y, tau_xy)
+}
+class "Vis" as troisDimensions.Formes.Vis.Vis {
+  NOM : str
+  construire_mesh()
+}
+troisDimensions.Formes.Cube.Cube --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Formes.Cylindre.Cylindre --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Formes.PoutreCarree.PoutreCarree --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Formes.PrismeTriangulaire.PrismeTriangulaire --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Formes.Sphere.Sphere --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Formes.Vis.Vis --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Environnement.Gravite.Gravite --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : gravite
+troisDimensions.Environnement.Sol.Sol --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : sol
+troisDimensions.app.Camera.Camera --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : camera
+troisDimensions.app.MaterielSimulation.MaterielSimulationApp --* menu.GestionnaireApplication : current_window
+troisDimensions.app.SafeQtInteractor.SafeQtInteractor --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : plotter
+@enduml
