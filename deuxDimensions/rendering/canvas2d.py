@@ -21,6 +21,7 @@ from deuxDimensions.domain.constantes import (
     SNAP_TOL,
     TIMER_MS,
 )
+from deuxDimensions.domain.geometry import sommets_rectangle_ax
 from deuxDimensions.physics.calculs import _geom_patch, _hauteur_appui_max, _resoudre_collision
 
 
@@ -228,19 +229,22 @@ class Canvas2D(FigureCanvasQTAgg):
             return
 
         a_bouge = False
-        ordre = sorted(range(len(self.blocs)), key=lambda i: self.blocs[i]["patch"].get_xy()[1])
+        ordre = sorted(range(len(self.blocs)), key=lambda i: self.blocs[i]["y"])
 
         for idx in ordre:
             if idx == self._idx_drag:
                 continue
 
-            patch = self.blocs[idx]["patch"]
-            x, y = patch.get_xy()
+            bloc = self.blocs[idx]
+            patch = bloc["patch"]
+            x = bloc["x"]
+            y = bloc["y"]
             plancher = _hauteur_appui_max(self.blocs, idx)
 
             if y > plancher + 0.001:
                 nouvelle_y = max(plancher, y - FALL_STEP)
-                patch.set_xy((x, nouvelle_y))
+                bloc["y"] = nouvelle_y
+                patch.set_xy(sommets_rectangle_ax(x, nouvelle_y, bloc["largeur"], bloc["h0"]))
                 a_bouge = True
 
         if a_bouge:
@@ -266,17 +270,10 @@ class Canvas2D(FigureCanvasQTAgg):
         else:
             y_depart = GROUND_Y
             if self.blocs:
-                sommets = [b["patch"].get_xy()[1] + b["patch"].get_height() for b in self.blocs]
-                y_depart = max(sommets)
+                y_depart = max(b["y"] + b["h0"] for b in self.blocs)
             x_depart = 0.5
 
-
-            points = [
-                (x_depart, y_depart),   
-                (x_depart + largeur, y_depart),
-                (x_depart + largeur, y_depart + hauteur),
-                (x_depart, y_depart + hauteur),]
-            
+        points = sommets_rectangle_ax(x_depart, y_depart, largeur, hauteur)
 
         patch = Polygon(
             points,
@@ -348,8 +345,10 @@ class Canvas2D(FigureCanvasQTAgg):
         for i, bloc in enumerate(reversed(self.blocs)):
             idx = len(self.blocs) - 1 - i
             patch = bloc["patch"]
-
-            if patch.contains_point((event.xdata, event.ydata)):
+            # contains_point(xdata,ydata) est faux ici : il faut les coords display,
+            # ou patch.contains(event) qui applique le bon transform.
+            dedans, _ = patch.contains(event)
+            if dedans:
                 return idx
         return None
 
@@ -395,14 +394,7 @@ class Canvas2D(FigureCanvasQTAgg):
         bloc["x"] = x
         bloc["y"] = y
 
-        points = [
-            (x, y),
-            (x + w, y),
-            (x + w, y + h),
-            (x, y + h),
-        ]
-
-        patch.set_xy(points)
+        patch.set_xy(sommets_rectangle_ax(x, y, w, h))
     
 
 
@@ -476,7 +468,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
 
             h0 = bloc["h0"]
-            w = bloc["w"]
+            w = bloc["largeur"]
             x, y = bloc["x"], bloc["y"]
 
             dh = stress.get("delta_h", 0.0)
