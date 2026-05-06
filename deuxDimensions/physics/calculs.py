@@ -9,9 +9,8 @@ from deuxDimensions.domain.constantes import GRAVITY, GROUND_Y, MATERIAUX, SNAP_
 
 def _geom_patch(rd: dict[str, Any]) -> tuple[float, float, float, float]:
     """Coin bas-gauche et dimensions du rectangle matplotlib du bloc."""
-    patch = rd["patch"]
-    x, y = patch.get_xy()
-    return x, y, patch.get_width(), patch.get_height()
+     
+    return rd["x"], rd["y"], rd["largeur"], rd["h0"]
 
 
 def _charge_verticale_equivalente(rd: dict[str, Any]) -> float:
@@ -75,10 +74,9 @@ def _statut_utilisation(util_pct: float) -> tuple[str, str]:
 
 def _overlaps_x(bloc_a: dict[str, Any], bloc_b: dict[str, Any]) -> bool:
     """Verifie si deux blocs se chevauchent horizontalement."""
-    xa, _ = bloc_a["patch"].get_xy()
-    wa = bloc_a["patch"].get_width()
-    xb, _ = bloc_b["patch"].get_xy()
-    wb = bloc_b["patch"].get_width()
+    xa, _, wa, _ = _geom_patch(bloc_a)
+    xb, _, wb, _ = _geom_patch(bloc_b)
+
     return xa < xb + wb and xb < xa + wa
 
 
@@ -95,10 +93,8 @@ def _contact_pairs(
             if i == j:
                 continue
 
-            xi, yi = blocs[i]["patch"].get_xy()
-            wi, hi = blocs[i]["patch"].get_width(), blocs[i]["patch"].get_height()
-            xj, yj = blocs[j]["patch"].get_xy()
-            wj = blocs[j]["patch"].get_width()
+            xi, yi, wi, hi = _geom_patch(blocs[i])
+            xj, yj, wj, hj = _geom_patch(blocs[j])
 
             contact_vertical = abs((yi + hi) - yj) <= tol
             if contact_vertical and _overlaps_x(blocs[i], blocs[j]):
@@ -201,6 +197,9 @@ def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
 
         f_axial = poids + f_ext + f_pression + f_contact
         sigma_axial = f_axial / aire
+
+        f_ext_x = bloc.get("ext_force_x", 0.0)  # force horizontale externe
+        tau= f_ext_x / aire  # contrainte de cisaillement horizontale
 
         tau = f_ext_x/ aire  # contrainte de cisaillement horizontale
 
