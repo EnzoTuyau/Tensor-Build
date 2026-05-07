@@ -13,7 +13,13 @@ if platform.system() == "Darwin":
                 QTimer.singleShot(0, self._deferred_render)
 
         def _deferred_render(self):
-            self._Iren.Render()
-            self._render_deferred = False
+            # Évite Render() sur un interactor déjà détruit (fermeture / switch de mode).
+            try:
+                if self.isVisible() and getattr(self, "_Iren", None) is not None:
+                    self._Iren.Render()
+            except Exception:
+                pass
+            finally:
+                self._render_deferred = False
 else:
     SafeQtInteractor = QtInteractor

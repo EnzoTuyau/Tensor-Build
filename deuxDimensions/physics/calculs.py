@@ -8,6 +8,11 @@ from deuxDimensions.domain.constantes import GRAVITY, GROUND_Y, MATERIAUX, SNAP_
 from deuxDimensions.domain.geometry import sommets_rectangle_ax
 
 
+def _tau_limite(mat: dict[str, Any]) -> float:
+    """Limite élastique en cisaillement (Pa), convention ductile : tau_lim = sigma_y / sqrt(3)."""
+    return float(mat["sigma_y"]) / (3.0**0.5)
+
+
 def _geom_patch(rd: dict[str, Any]) -> tuple[float, float, float, float]:
     """Coin bas-gauche et dimensions du rectangle matplotlib du bloc."""
      
@@ -18,6 +23,157 @@ def _charge_verticale_equivalente(rd: dict[str, Any]) -> float:
     """Poids + charges appliquees, ramenees a une charge verticale (N)."""
     _, _, w, h = _geom_patch(rd)
     return rd["density"] * w * h * GRAVITY + rd["ext_force"] + rd["pressure"] * w
+
+
+def _charge_verticale_au_bas_de_la_pile(
+    blocs: list[dict[str, Any]],
+    idx: int,
+    paires: list[tuple[int, int, float]],
+    memo: dict[int, float],
+) -> float:
+    """Charge verticale totale au bas du bloc (pile comprise).
+
+    Inclut le poids/charges du bloc et tout ce qui lui est superposé au-dessus,
+    via récurrence sur les paires de contact.
+    """
+    if idx in memo:
+        return memo[idx]
+    own = _charge_verticale_equivalente(blocs[idx])
+    from_above = sum(
+        _charge_verticale_au_bas_de_la_pile(blocs, ih, paires, memo)
+        for (ib, ih, _) in paires
+        if ib == idx
+    )
+    memo[idx] = own + from_above
+    return memo[idx]
+
+
+def _statut_utilisation(util_pct: float) -> tuple[str, str]:
+    """Libelle et pictogramme selon le % d'utilisation par rapport a sigma_y."""
+    if util_pct < 80:
+        return "OK", "✓"
+    if util_pct < 100:
+        return "⚠️ Attention", "!"
+    return "❌ RUPTURE", "✗"
+
+
+def _contraintes_et_detail_bloc(
+    i: int,
+    bloc: dict[str, Any],
+    blocs: list[dict[str, Any]],
+    paires: list[tuple[int, int, float]],
+    memo_axiale_totale: dict[int, float],
+) -> tuple[dict[str, Any], str, list[str]]:
+    _, _, w, h = _geom_patch(bloc)
+    aire = w * h
+    mat = MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])
+
+    poids = bloc["density"] * aire * GRAVITY
+    f_ext = bloc["ext_force"]
+    f_ext_x = bloc.get("ext_force_x", 0.0)
+    f_pression = bloc["pressure"] * w
+
+    f_contact = sum(
+        _charge_verticale_au_bas_de_la_pile(blocs, ih, paires, memo_axiale_totale)
+        for (i_bas, ih, _) in paires
+        if i_bas == i
+    )
+
+    f_axial = poids + f_ext + f_pression + f_contact
+    sigma_axial = f_axial / aire
+
+    tau_xy_moy = f_ext_x / aire if aire > 0 else 0.0
+    tau_xy_max = 1.5 * tau_xy_moy
+
+    moment = bloc["moment"]
+    i_local = (w * h**3) / 12
+    sig_haut = moment * (h / 2) / i_local if i_local > 0 else 0.0
+    sig_bas = moment * (-h / 2) / i_local if i_local > 0 else 0.0
+
+    sigma_normal_top = sigma_axial + sig_haut
+    sigma_normal_bot = sigma_axial + sig_bas
+    sigma_max_normal = max(abs(sigma_normal_top), abs(sigma_normal_bot))
+
+    tau_for_vm = abs(tau_xy_max)
+    sigma_eq_von_mises = (sigma_max_normal**2 + 3.0 * tau_for_vm**2) ** 0.5
+
+    sigma_y = mat["sigma_y"]
+    tau_lim = _tau_limite(mat)
+    util_axial_flex = sigma_max_normal / sigma_y * 100 if sigma_y > 0 else 0.0
+    util_shear = abs(tau_xy_max) / tau_lim * 100 if tau_lim > 0 else 0.0
+    util_von_mises = sigma_eq_von_mises / sigma_y * 100 if sigma_y > 0 else 0.0
+
+    statut, sym = _statut_utilisation(util_von_mises)
+
+    E = mat["E"]
+    nu = 0.3
+    G = E / (2 * (1 + nu))
+
+    delta_h = (f_axial * h) / (E * aire) if aire > 0 and E > 0 else 0.0
+    delta_x = (f_ext_x * h) / (G * aire) if aire > 0 and G > 0 else 0.0
+
+    resume = (
+        f"  Bloc <b>{i + 1}</b> ({bloc['material']}) : "
+        f"σ<sub>eq</sub> = <b>{sigma_eq_von_mises/1e6:.2f} MPa</b>, "
+        f"<b>{util_von_mises:.0f}%</b> {sym}"
+    )
+
+    lignes_detail = [
+        f"<b style='color:#e65100'>── Bloc {i+1} ({bloc['material']}) ──</b>",
+        "<span style='color:#546e7a'><b>Compression / traction axiale</b> (σ<sub>axial</sub> &gt; 0 : compression sous charges descendantes)</span>",
+        f"  F axiale totale : <b>{f_axial:.1f} N</b> (poids + F<sub>z</sub> + pression×w + contact)",
+        f"  σ axiale        : {sigma_axial/1e6:.3f} MPa",
+        "",
+        "<span style='color:#546e7a'><b>Flexion</b></span>",
+        f"  Moment M        : {moment:.1f} N·m",
+        f"  σ flex fibre haut : {sig_haut/1e6:.3f} MPa",
+        f"  σ flex fibre bas  : {sig_bas/1e6:.3f} MPa",
+        f"  σ normal haut (σ<sub>ax</sub>+σ<sub>flex</sub>) : {sigma_normal_top/1e6:.3f} MPa",
+        f"  σ normal bas      : {sigma_normal_bot/1e6:.3f} MPa",
+        f"  max |σ normal| fibres : {sigma_max_normal/1e6:.3f} MPa — util. {util_axial_flex:.1f}% / σ<sub>y</sub>",
+        "",
+        "<span style='color:#546e7a'><b>Cisaillement</b> (effort F<sub>x</sub>, section rect., τ<sub>max</sub> ≈ 1.5 τ<sub>moy</sub>)</span>",
+        f"  F<sub>x</sub>           : {f_ext_x:.1f} N",
+        f"  τ moy            : {tau_xy_moy/1e6:.4f} MPa",
+        f"  τ max            : {tau_xy_max/1e6:.4f} MPa",
+        f"  τ limite (σ<sub>y</sub>/√3) : {tau_lim/1e6:.3f} MPa — util. cisaillement {util_shear:.1f}%",
+        "",
+        "<span style='color:#546e7a'><b>Critère combiné (von Mises, sans torsion)</b></span>",
+        f"  σ<sub>eq</sub> von Mises : {sigma_eq_von_mises/1e6:.3f} MPa",
+        f"  σ<sub>y</sub> limite    : {sigma_y/1e6:.0f} MPa",
+        f"  <b>Utilisation globale : {util_von_mises:.1f}% {statut}</b>",
+        "",
+        f"  Poids propre   : {poids:.1f} N",
+        f"  Charge contact : {f_contact:.1f} N",
+        f"  Force vert. ext.: {f_ext:.1f} N",
+        f"  Pression       : {f_pression:.1f} N",
+        "",
+    ]
+
+    stress = {
+        "sigma_total": sigma_eq_von_mises,
+        "sigma_axial": sigma_axial,
+        "sigma_bending_top": sig_haut,
+        "sigma_bending_bot": sig_bas,
+        "sigma_normal_top": sigma_normal_top,
+        "sigma_normal_bot": sigma_normal_bot,
+        "sigma_max_normal": sigma_max_normal,
+        "sigma_eq_von_mises": sigma_eq_von_mises,
+        "tau_xy_moy": tau_xy_moy,
+        "tau_xy_max": tau_xy_max,
+        "tau_lim": tau_lim,
+        "util_axial_flex": util_axial_flex,
+        "util_shear": util_shear,
+        "util_von_mises": util_von_mises,
+        "ext_force": f_ext + f_pression,
+        "ext_force_x": f_ext_x,
+        "pressure": bloc["pressure"],
+        "utilization": util_von_mises,
+        "F_axial": f_axial,
+        "delta_h": delta_h,
+        "delta_x": delta_x,
+    }
+    return stress, resume, lignes_detail
 
 
 def _hauteur_appui_max(blocs: list[dict[str, Any]], idx: int) -> float:
@@ -62,15 +218,6 @@ def _statistiques_globales_section(
         for x, y, w, h, _ in rectangles
     )
     return aire_totale, xg, yg, ixx, iyy, masse
-
-
-def _statut_utilisation(util_pct: float) -> tuple[str, str]:
-    """Libelle et pictogramme selon le % d'utilisation par rapport a sigma_y."""
-    if util_pct < 80:
-        return "OK", "✓"
-    if util_pct < 100:
-        return "⚠️ Attention", "!"
-    return "❌ RUPTURE", "✗"
 
 
 def _overlaps_x(bloc_a: dict[str, Any], bloc_b: dict[str, Any]) -> bool:
@@ -154,9 +301,15 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
     return collision
 
 
-def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
+def calculer_donnees_physiques(
+    blocs: list[dict[str, Any]], gravite_active: bool = True
+) -> dict[str, Any]:
     """
     Calcule les contraintes de tous les blocs et genere les contenus HTML.
+
+    Si gravite_active est False : pas de paires de contact ni de transmission
+    verticale par superposition (chaque bloc ne voit que son propre poids et
+    les charges explicites). La gravité simulée (chute) est pilotée par le canvas.
 
     Sortie:
       - donnees_stress: liste des dictionnaires de contraintes
@@ -183,96 +336,19 @@ def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
         "",
     ]
 
-    paires = _contact_pairs(blocs)
+    paires = _contact_pairs(blocs) if gravite_active else []
+    memo_axiale_totale: dict[int, float] = {}
     donnees_stress: list[dict[str, Any]] = []
     resumes = []
     lignes_detail = []
 
     for i, bloc in enumerate(blocs):
-        _, _, w, h = _geom_patch(bloc)
-        aire = w * h
-        mat = MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])
-
-        poids = bloc["density"] * aire * GRAVITY
-        f_ext = bloc["ext_force"]
-        f_ext_x = bloc.get("ext_force_x", 0.0)  # force horizontale externe
-        f_pression = bloc["pressure"] * w
-
-        f_contact = sum(
-            _charge_verticale_equivalente(blocs[j]) for (i_bas, j, _) in paires if i_bas == i
+        stress, resume, detail_fragments = _contraintes_et_detail_bloc(
+            i, bloc, blocs, paires, memo_axiale_totale
         )
-
-        f_axial = poids + f_ext + f_pression + f_contact
-        sigma_axial = f_axial / aire
-
-        f_ext_x = bloc.get("ext_force_x", 0.0)  # force horizontale externe
-        tau= f_ext_x / aire  # contrainte de cisaillement horizontale
-
-        tau = f_ext_x/ aire  # contrainte de cisaillement horizontale
-
-        moment = bloc["moment"]
-        i_local = (w * h**3) / 12
-        sig_haut = moment * (h / 2) / i_local if i_local > 0 else 0
-        sig_bas = moment * (-h / 2) / i_local if i_local > 0 else 0
-
-        sigma_max = max(abs(sigma_axial + sig_haut), abs(sigma_axial + sig_bas))
-
-        sigma_eq = (sigma_max**2 + 3 * tau**2)**0.5  # contrainte équivalente de von Mises
-
-        sigma_y = mat["sigma_y"]
-        taux = sigma_eq / sigma_y * 100
-        statut, sym = _statut_utilisation(taux)
-
-        #Recuperer les proprietes du materiau
-        E = mat["E"]
-        nu = 0.3  # coefficient de Poisson (hypothese)
-        G = E / (2 * (1 + nu))  # module de cisail
-
-        #Calcul des deformations
-        delta_h = (f_axial * h) / (E * aire)  # deformation axiale
-        delta_x = (f_ext_x * h) / (G * aire)  # deformation de cisaillement
-
-        resumes.append(
-            f"  Bloc <b>{i + 1}</b> ({bloc['material']}) : "
-            f"σ = <b>{sigma_max/1e6:.2f} MPa</b>, "
-            f"<b>{taux:.0f}%</b> {sym}"
-        )
-
-        lignes_detail += [
-            f"<b style='color:#e65100'>── Bloc {i+1} ({bloc['material']}) ──</b>",
-            f"  Poids propre   : {poids:.1f} N",
-            f"  Charge contact : {f_contact:.1f} N",
-            f"  Force ext.     : {f_ext:.1f} N",
-            f"  Pression       : {f_pression:.1f} N",
-            f"  <b>F axiale total : {f_axial:.1f} N</b>",
-            f"  σ axiale       : {sigma_axial/1e6:.3f} MPa",
-        ]
-        if abs(moment) > 0:
-            lignes_detail += [
-                f"  σ flex haut    : {sig_haut/1e6:.3f} MPa",
-                f"  σ flex bas     : {sig_bas/1e6:.3f} MPa",
-            ]
-        lignes_detail += [
-            f"  <b>σ max          : {sigma_max/1e6:.3f} MPa</b>",
-            f"  σ_y limite     : {sigma_y/1e6:.0f} MPa",
-            f"  Utilisation    : {taux:.1f}% {statut}",
-            "",
-        ]
-
-        donnees_stress.append(
-            {
-                "sigma_total": sigma_max,
-                "sigma_axial": sigma_axial,
-                "sigma_bending_top": sig_haut,
-                "sigma_bending_bot": sig_bas,
-                "ext_force": f_ext + f_pression,
-                "pressure": bloc["pressure"],
-                "utilization": taux,
-                "F_axial": f_axial,
-                "delta_h": delta_h,
-                "delta_x": delta_x,
-            }
-        )
+        donnees_stress.append(stress)
+        resumes.append(resume)
+        lignes_detail.extend(detail_fragments)
 
     lignes_contact = []
     if paires:
@@ -290,7 +366,7 @@ def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
         entete
         + [
             "<b style='color:#2e7d32'>══ Contraintes sur les blocs ══</b>",
-            "<span style='color:#666;font-size:9px'>Résumé σ / utilisation.</span>",
+            "<span style='color:#666;font-size:9px'>Résumé σ<sub>eq</sub> (von Mises) / utilisation globale.</span>",
         ]
         + resumes
         + ["", "<b style='color:#1565c0'>══ Détail par bloc ══</b>", ""]

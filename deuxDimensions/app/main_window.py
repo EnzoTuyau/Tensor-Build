@@ -16,7 +16,7 @@ class MaterialSimulationApp(QMainWindow):
     """
     Fenetre principale de la simulation 2D.
     Assemble le canvas et le panneau de controle,
-    et orchestre les calculs physiques.
+    et orchestre les calculs physiques (physique → ruptures / latch → dessin).
     """
 
     def __init__(self, mode="2D", switch_callback=None):
@@ -30,7 +30,11 @@ class MaterialSimulationApp(QMainWindow):
         mise_en_page.setContentsMargins(0, 0, 0, 0)
         mise_en_page.setSpacing(0)
 
-        self.canvas = Canvas2D(central, on_blocs_changes=self._on_changed)
+        self.canvas = Canvas2D(
+            central,
+            on_blocs_changes=self._on_changed,
+            on_rupture_message=self._message_rupture_bloc,
+        )
         mise_en_page.addWidget(self.canvas, stretch=1)
 
         self.panneau = PanneauControle(self.canvas, self._on_changed)
@@ -42,13 +46,32 @@ class MaterialSimulationApp(QMainWindow):
         dock = QDockWidget("Contrôles", self)
         dock.setWidget(self.panneau)
         dock.setMinimumWidth(320)
+        dock.setStyleSheet(
+            """
+            QDockWidget {
+                background-color: #050607;
+                color: #eaf2ff;
+            }
+            QDockWidget::title {
+                background-color: #06080c;
+                padding: 10px 14px;
+                border-bottom: 1px solid #223753;
+                font-weight: bold;
+                color: #9ec8ff;
+            }
+            """
+        )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+
+    def _message_rupture_bloc(self, message: str):
+        self.statusBar().showMessage(message, 6500)
 
     def _on_changed(self, *, refresh_list=True):
         """Recalcule la physique et redessine ; met a jour la liste si demande."""
         if refresh_list:
             self.panneau.rafraichir_liste()
         donnees_stress, paires = self._calculer_physique()
+        self.canvas.verifier_ruptures_apres_physique(donnees_stress)
         self.canvas.dessiner_contraintes(donnees_stress, paires)
         self.panneau.rafraichir_infobulle_contact(paires, donnees_stress)
 
@@ -57,7 +80,9 @@ class MaterialSimulationApp(QMainWindow):
         Calcule et met a jour les zones de resultats HTML du panneau.
         Retourne les donnees de stress et les paires de contact.
         """
-        resultats = calculer_donnees_physiques(self.canvas.blocs)
+        resultats = calculer_donnees_physiques(
+            self.canvas.blocs, gravite_active=self.canvas.gravite_active
+        )
         self.panneau.afficher_rapport_detail(resultats["html_rapport"])
         self.panneau.afficher_cdgr(resultats["html_cdgr"])
         if not self.canvas.blocs:

@@ -102,6 +102,22 @@ class MaterielSimulationApp(QMainWindow):
         scene.plotter.interactor.installEventFilter(scene)
         scene._refresh_action_buttons()
 
+    def closeEvent(scene, event):
+        """Libère VTK / OpenGL avant destruction du widget (évite segfault au switch 2D)."""
+        try:
+            scene.plotter.interactor.removeEventFilter(scene)
+        except Exception:
+            pass
+        try:
+            scene.plotter.disable_picking()
+        except Exception:
+            pass
+        try:
+            scene.plotter.close()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
     # ------------------------------------------------------------------ #
     #  UI                                                                  #
     # ------------------------------------------------------------------ #
