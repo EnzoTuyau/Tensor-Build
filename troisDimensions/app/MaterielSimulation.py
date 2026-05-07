@@ -30,7 +30,8 @@ class MaterielSimulationApp(QMainWindow):
         scene.layout = QHBoxLayout(scene.central_widget)
 
         # Zone 3D (gauche)
-        scene.plotter = SafeQtInteractor(scene.central_widget)
+        # auto_update=False : sinon QTimer périodique + fermeture = race OpenGL/VTK (macOS).
+        scene.plotter = SafeQtInteractor(scene.central_widget, auto_update=False)
         scene.plotter.set_background("#0a1018")
         scene.plotter.add_axes()
         scene.sol = Sol(scene.plotter)
@@ -97,11 +98,25 @@ class MaterielSimulationApp(QMainWindow):
 
         # Liste d'objets Forme
         scene.objects = []
-        scene._mode_contraintes_actif = False
         scene._resize_drag_active = False
         scene._resize_drag_last_y = None
         scene.plotter.interactor.installEventFilter(scene)
         scene._refresh_action_buttons()
+
+    def closeEvent(self, event):
+        # Fermer explicitement le QtInteractor (render_timer, BasePlotter, QVTK) avant
+        # que Qt ne détruisse l’arbre de widgets : sinon segfault en changeant de mode.
+        if hasattr(self, "plotter") and self.plotter is not None:
+            try:
+                self.plotter.interactor.removeEventFilter(self)
+            except RuntimeError:
+                pass
+            try:
+                if not getattr(self.plotter, "_closed", False):
+                    self.plotter.close()
+            except RuntimeError:
+                pass
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------ #
     #  UI                                                                  #
@@ -333,29 +348,31 @@ class MaterielSimulationApp(QMainWindow):
 
     def eventFilter(scene, obj, event):
         if obj is scene.plotter.interactor:
-            # Clic DROIT pour redimensionner (libère le clic gauche pour la caméra)
-            if event.type() == QEvent.MouseButtonPress:
-                if event.button() == 2 and scene.forme_selectionnee is not None:
+            if event.type() == QEvent.MouseButtonPress and scene.forme_selectionnee is not None:
+                if event.button() == 1:  # clic gauche
                     scene._resize_drag_active = True
                     scene._resize_drag_last_y = event.position().y()
                     return True
-            elif event.type() == QEvent.MouseMove and scene._resize_drag_active:
+            elif event.type() == QEvent.MouseMove and scene._resize_drag_active and scene.forme_selectionnee is not None:
                 y_now = event.position().y()
                 dy = scene._resize_drag_last_y - y_now
                 if abs(dy) >= 1:
                     facteur = 1.0 + (dy * 0.008)
                     facteur = max(0.2, min(5.0, facteur))
+
                     forme = scene.forme_selectionnee
                     new_r = max(0.1, forme.params["rayon"] * facteur)
                     new_l = max(0.1, forme.params["longueur"] * facteur)
                     forme.params["rayon"] = new_r
                     forme.params["longueur"] = new_l
+
                     scene.spin_radius.blockSignals(True)
                     scene.spin_length.blockSignals(True)
                     scene.spin_radius.setValue(new_r)
                     scene.spin_length.setValue(new_l)
                     scene.spin_radius.blockSignals(False)
                     scene.spin_length.blockSignals(False)
+
                     scene.dessiner_forme(forme)
                     scene.plotter.remove_actor(forme.actor)
                     forme.actor = scene.plotter.add_mesh(
