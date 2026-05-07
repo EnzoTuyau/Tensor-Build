@@ -97,6 +97,7 @@ class MaterielSimulationApp(QMainWindow):
 
         # Liste d'objets Forme
         scene.objects = []
+        scene._mode_contraintes_actif = False
         scene._resize_drag_active = False
         scene._resize_drag_last_y = None
         scene.plotter.interactor.installEventFilter(scene)
@@ -412,16 +413,24 @@ class MaterielSimulationApp(QMainWindow):
                 cx_a, cy_a = forme_a.params["centre"][0], forme_a.params["centre"][1]
                 cx_b, cy_b = forme_b.params["centre"][0], forme_b.params["centre"][1]
 
-                # Vérifie chevauchement horizontal
+                # Rayon de collision vertical = rayon de la forme
+                demi_h_a = forme_a.r
+                demi_h_b = forme_b.r
+
+                # Rayon de collision horizontal = longueur/2 (car forme orientée sur X)
+                demi_w_a = forme_a.l / 2
+                demi_w_b = forme_b.l / 2
+
+                # Chevauchement horizontal (plan XY)
                 dist_horiz = ((cx_a - cx_b)**2 + (cy_a - cy_b)**2) ** 0.5
-                if dist_horiz >= forme_a.r + forme_b.r:
+                if dist_horiz >= demi_w_a + demi_w_b:
                     continue
 
-                # Vérifie chevauchement vertical
-                bas_a  = etat_a["z"] - forme_a.l / 2
-                haut_a = etat_a["z"] + forme_a.l / 2
-                bas_b  = etat_b["z"] - forme_b.l / 2
-                haut_b = etat_b["z"] + forme_b.l / 2
+                # Chevauchement vertical (axe Z)
+                bas_a  = etat_a["z"] - demi_h_a
+                haut_a = etat_a["z"] + demi_h_a
+                bas_b  = etat_b["z"] - demi_h_b
+                haut_b = etat_b["z"] + demi_h_b
 
                 if bas_a >= haut_b or bas_b >= haut_a:
                     continue
@@ -435,7 +444,7 @@ class MaterielSimulationApp(QMainWindow):
                 etat_a["vitesse_z"] = (v_a * (m_a - m_b) + 2 * m_b * v_b) / (m_a + m_b)
                 etat_b["vitesse_z"] = (v_b * (m_b - m_a) + 2 * m_a * v_a) / (m_a + m_b)
 
-                # Sépare les formes pour éviter qu'elles restent collées
+                # Sépare les formes
                 overlap = min(haut_a, haut_b) - max(bas_a, bas_b)
                 etat_a["z"] += overlap / 2
                 etat_b["z"] -= overlap / 2
@@ -505,7 +514,8 @@ class MaterielSimulationApp(QMainWindow):
             scene._detecter_collisions(etats)
 
             frame_count += 1
-            if frame_count % CONTRAINTES_INTERVAL == 0:
+            if scene._mode_contraintes_actif and frame_count % CONTRAINTES_INTERVAL == 0:
+                
                 for etat in etats:
                     forme = etat["forme"]
                     mesh = forme.mesh
@@ -557,6 +567,7 @@ class MaterielSimulationApp(QMainWindow):
     #---- méthodes pour la vue de résistance -----#
     
     def afficher_resistance(scene):
+        scene._mode_contraintes_actif = True
         if not scene.objects:
             return
 
@@ -651,6 +662,7 @@ class MaterielSimulationApp(QMainWindow):
     
 
     def reinitialiser_couleurs(scene):
+        scene._mode_contraintes_actif = False
         """Remet les couleurs originales du matériau sur toutes les formes."""
         if not scene.objects:
             return
