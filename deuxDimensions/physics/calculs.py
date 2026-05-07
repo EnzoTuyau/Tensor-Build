@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from deuxDimensions.domain.constantes import GRAVITY, GROUND_Y, MATERIAUX, SNAP_TOL
+from deuxDimensions.domain.geometry import sommets_rectangle_ax
 
 
 def _geom_patch(rd: dict[str, Any]) -> tuple[float, float, float, float]:
     """Coin bas-gauche et dimensions du rectangle matplotlib du bloc."""
-    patch = rd["patch"]
-    x, y = patch.get_xy()
-    return x, y, patch.get_width(), patch.get_height()
+     
+    return rd["x"], rd["y"], rd["largeur"], rd["h0"]
 
 
 def _charge_verticale_equivalente(rd: dict[str, Any]) -> float:
@@ -75,10 +75,9 @@ def _statut_utilisation(util_pct: float) -> tuple[str, str]:
 
 def _overlaps_x(bloc_a: dict[str, Any], bloc_b: dict[str, Any]) -> bool:
     """Verifie si deux blocs se chevauchent horizontalement."""
-    xa, _ = bloc_a["patch"].get_xy()
-    wa = bloc_a["patch"].get_width()
-    xb, _ = bloc_b["patch"].get_xy()
-    wb = bloc_b["patch"].get_width()
+    xa, _, wa, _ = _geom_patch(bloc_a)
+    xb, _, wb, _ = _geom_patch(bloc_b)
+
     return xa < xb + wb and xb < xa + wa
 
 
@@ -95,10 +94,8 @@ def _contact_pairs(
             if i == j:
                 continue
 
-            xi, yi = blocs[i]["patch"].get_xy()
-            wi, hi = blocs[i]["patch"].get_width(), blocs[i]["patch"].get_height()
-            xj, yj = blocs[j]["patch"].get_xy()
-            wj = blocs[j]["patch"].get_width()
+            xi, yi, wi, hi = _geom_patch(blocs[i])
+            xj, yj, wj, hj = _geom_patch(blocs[j])
 
             contact_vertical = abs((yi + hi) - yj) <= tol
             if contact_vertical and _overlaps_x(blocs[i], blocs[j]):
@@ -112,18 +109,22 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
     """
     Repousse un bloc mobile hors collision par l'axe de moindre penetration.
     """
-    patch_mobile = blocs[idx_mobile]["patch"]
-    mx, my = patch_mobile.get_xy()
-    largeur, hauteur = patch_mobile.get_width(), patch_mobile.get_height()
+    mobile = blocs[idx_mobile]
+    patch_mobile = mobile["patch"]
+    mx = mobile["x"]
+    my = mobile["y"]
+    largeur = mobile["largeur"]
+    hauteur = mobile["h0"]
     collision = False
 
     for i, autre_bloc in enumerate(blocs):
         if i == idx_mobile:
             continue
 
-        patch_autre = autre_bloc["patch"]
-        ox, oy = patch_autre.get_xy()
-        ow, oh = patch_autre.get_width(), patch_autre.get_height()
+        ox = autre_bloc["x"]
+        oy = autre_bloc["y"]
+        ow = autre_bloc["largeur"]
+        oh = autre_bloc["h0"]
 
         chevauche_x = mx < ox + ow and ox < mx + largeur
         chevauche_y = my < oy + oh and oy < my + hauteur
@@ -137,15 +138,17 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
             min_penet = min(penet_haut, penet_bas, penet_droite, penet_gauche)
 
             if min_penet == penet_haut:
-                patch_mobile.set_xy((mx, oy + oh))
+                my = oy + oh
             elif min_penet == penet_bas:
-                patch_mobile.set_xy((mx, oy - hauteur))
+                my = oy - hauteur
             elif min_penet == penet_droite:
-                patch_mobile.set_xy((ox + ow, my))
+                mx = ox + ow
             else:
-                patch_mobile.set_xy((ox - largeur, my))
+                mx = ox - largeur
 
-            mx, my = patch_mobile.get_xy()
+            mobile["x"] = mx
+            mobile["y"] = my
+            patch_mobile.set_xy(sommets_rectangle_ax(mx, my, largeur, hauteur))
             collision = True
 
     return collision
@@ -201,6 +204,9 @@ def calculer_donnees_physiques(blocs: list[dict[str, Any]]) -> dict[str, Any]:
 
         f_axial = poids + f_ext + f_pression + f_contact
         sigma_axial = f_axial / aire
+
+        f_ext_x = bloc.get("ext_force_x", 0.0)  # force horizontale externe
+        tau= f_ext_x / aire  # contrainte de cisaillement horizontale
 
         tau = f_ext_x/ aire  # contrainte de cisaillement horizontale
 

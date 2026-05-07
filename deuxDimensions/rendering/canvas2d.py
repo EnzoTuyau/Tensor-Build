@@ -7,8 +7,9 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from matplotlib.patches import FancyArrowPatch, Rectangle
+from matplotlib.patches import FancyArrowPatch, Polygon, Rectangle 
 from PySide6.QtCore import QPoint, QRect, QTimer
+
 
 from deuxDimensions.domain.constantes import (
     AXIS_XLIM,
@@ -20,6 +21,7 @@ from deuxDimensions.domain.constantes import (
     SNAP_TOL,
     TIMER_MS,
 )
+from deuxDimensions.domain.geometry import sommets_rectangle_ax
 from deuxDimensions.physics.calculs import _geom_patch, _hauteur_appui_max, _resoudre_collision
 
 
@@ -227,19 +229,22 @@ class Canvas2D(FigureCanvasQTAgg):
             return
 
         a_bouge = False
-        ordre = sorted(range(len(self.blocs)), key=lambda i: self.blocs[i]["patch"].get_xy()[1])
+        ordre = sorted(range(len(self.blocs)), key=lambda i: self.blocs[i]["y"])
 
         for idx in ordre:
             if idx == self._idx_drag:
                 continue
 
-            patch = self.blocs[idx]["patch"]
-            x, y = patch.get_xy()
+            bloc = self.blocs[idx]
+            patch = bloc["patch"]
+            x = bloc["x"]
+            y = bloc["y"]
             plancher = _hauteur_appui_max(self.blocs, idx)
 
             if y > plancher + 0.001:
                 nouvelle_y = max(plancher, y - FALL_STEP)
-                patch.set_xy((x, nouvelle_y))
+                bloc["y"] = nouvelle_y
+                patch.set_xy(sommets_rectangle_ax(x, nouvelle_y, bloc["largeur"], bloc["h0"]))
                 a_bouge = True
 
         if a_bouge:
@@ -265,14 +270,14 @@ class Canvas2D(FigureCanvasQTAgg):
         else:
             y_depart = GROUND_Y
             if self.blocs:
-                sommets = [b["patch"].get_xy()[1] + b["patch"].get_height() for b in self.blocs]
-                y_depart = max(sommets)
+                y_depart = max(b["y"] + b["h0"] for b in self.blocs)
             x_depart = 0.5
 
-        patch = Rectangle(
-            (x_depart, y_depart),
-            largeur,
-            hauteur,
+        points = sommets_rectangle_ax(x_depart, y_depart, largeur, hauteur)
+
+        patch = Polygon(
+            points,
+            closed=True,
             facecolor=fc,
             edgecolor=ec,
             linewidth=1.8,
@@ -284,11 +289,15 @@ class Canvas2D(FigureCanvasQTAgg):
         self.blocs.append(
             {
                 "patch": patch,
+                "x": x_depart,
+                "y": y_depart,
+                "largeur": largeur,
+                "h0": hauteur,
                 "material": materiau,
-                "density": densite,
-                "h0": hauteur, 
+                "density": densite, 
                 "edgecolor": ec,
                 "ext_force": 0.0,
+                "ext_force_x": 0.0,
                 "moment": 0.0,
                 "pressure": 0.0,
                 "heatmap_matrice": None,
@@ -328,18 +337,18 @@ class Canvas2D(FigureCanvasQTAgg):
         Retourne l'index du bloc clique, en partant du dessus (dernier ajoute).
         Retourne None si le clic est dans le vide.
         """
+
+        if event.xdata is None or event.ydata is None:
+            return None
+        
+
         for i, bloc in enumerate(reversed(self.blocs)):
             idx = len(self.blocs) - 1 - i
-            xy = bloc["patch"].get_xy()
-            w, h = bloc["patch"].get_width(), bloc["patch"].get_height()
-
-            dans_le_bloc = (
-                event.xdata is not None
-                and event.ydata is not None
-                and xy[0] <= event.xdata <= xy[0] + w
-                and xy[1] <= event.ydata <= xy[1] + h
-            )
-            if dans_le_bloc:
+            patch = bloc["patch"]
+            # contains_point(xdata,ydata) est faux ici : il faut les coords display,
+            # ou patch.contains(event) qui applique le bon transform.
+            dedans, _ = patch.contains(event)
+            if dedans:
                 return idx
         return None
 
@@ -356,8 +365,12 @@ class Canvas2D(FigureCanvasQTAgg):
         idx = self._tester_clic(event)
         if idx is not None:
             self._idx_drag = idx
-            xy = self.blocs[idx]["patch"].get_xy()
-            self._offset_drag = (event.xdata - xy[0], event.ydata - xy[1])
+            
+            self._offset_drag = (
+                event.xdata - self.blocs[idx]["x"],
+                event.ydata - self.blocs[idx]["y"],
+            )
+            
 
     def _souris_mouvement(self, event):
         if self._idx_drag is None or event.inaxes != self.axes:
@@ -365,14 +378,25 @@ class Canvas2D(FigureCanvasQTAgg):
         if event.xdata is None or event.ydata is None:
             return
 
-        patch = self.blocs[self._idx_drag]["patch"]
+        bloc = self.blocs[self._idx_drag]
+        patch = bloc["patch"]
+
+        w = bloc["largeur"]
+        h = bloc["h0"]
+
         xmin, xmax = self.axes.get_xlim()
         _, ymax = self.axes.get_ylim()
-        w, h = patch.get_width(), patch.get_height()
+        
 
         x = max(xmin, min(xmax - w, event.xdata - self._offset_drag[0]))
         y = max(GROUND_Y, min(ymax - h, event.ydata - self._offset_drag[1]))
-        patch.set_xy((x, y))
+
+        bloc["x"] = x
+        bloc["y"] = y
+
+        patch.set_xy(sommets_rectangle_ax(x, y, w, h))
+    
+
 
         _resoudre_collision(self._idx_drag, self.blocs)
         self.draw_idle()
@@ -444,12 +468,26 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
 
             h0 = bloc["h0"]
+            w = bloc["largeur"]
+            x, y = bloc["x"], bloc["y"]
+
             dh = stress.get("delta_h", 0.0)
+            dx = stress.get("delta_x", 0.0)
 
-            nouveau_h = max(0.01, h0 - (dh*VISUAL_SCALE))
-            bloc["patch"].set_height(nouveau_h)
+            v_dh = dh * VISUAL_SCALE
+            v_dx = dx * VISUAL_SCALE
 
-            x, y, w, h = _geom_patch(bloc)
+            h_animee = max(0.01, h0 - v_dh)
+
+            nouveaux_points = [
+                (x, y),
+                (x + w, y),
+                (x + w + v_dx, y + h_animee),
+                (x + v_dx, y + h_animee),
+            ]
+            bloc["patch"].set_xy(nouveaux_points)
+
+            h = h_animee
 
             if self.carte_chaleur and norme_pression is not None:
                 p_pa = float(bloc["pressure"])
