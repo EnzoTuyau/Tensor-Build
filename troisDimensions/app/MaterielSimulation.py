@@ -412,42 +412,33 @@ class MaterielSimulationApp(QMainWindow):
                 cx_a, cy_a = forme_a.params["centre"][0], forme_a.params["centre"][1]
                 cx_b, cy_b = forme_b.params["centre"][0], forme_b.params["centre"][1]
 
+                # Vérifie chevauchement horizontal
                 dist_horiz = ((cx_a - cx_b)**2 + (cy_a - cy_b)**2) ** 0.5
-                dist_min_horiz = forme_a.r + forme_b.r
-
-                # Seulement si elles se chevauchent horizontalement
-                if dist_horiz >= dist_min_horiz:
+                if dist_horiz >= forme_a.r + forme_b.r:
                     continue
 
-                bas_a = etat_a["z"] - forme_a.l / 2
-                haut_b = etat_b["z"] + forme_b.l / 2
-                bas_b = etat_b["z"] - forme_b.l / 2
+                # Vérifie chevauchement vertical
+                bas_a  = etat_a["z"] - forme_a.l / 2
                 haut_a = etat_a["z"] + forme_a.l / 2
+                bas_b  = etat_b["z"] - forme_b.l / 2
+                haut_b = etat_b["z"] + forme_b.l / 2
 
-                chevauchement_vert = bas_a < haut_b and haut_a > bas_b
-
-                if not chevauchement_vert:
+                if bas_a >= haut_b or bas_b >= haut_a:
                     continue
 
-                # Collision détectée — échange de vitesses
+                # Collision — échange de vitesses
                 m_a = etat_a["masse"]
                 m_b = etat_b["masse"]
                 v_a = etat_a["vitesse_z"]
                 v_b = etat_b["vitesse_z"]
 
-                # Seulement si elles s'approchent l'une de l'autre
-                if v_a - v_b <= 0:
-                    continue
-
                 etat_a["vitesse_z"] = (v_a * (m_a - m_b) + 2 * m_b * v_b) / (m_a + m_b)
                 etat_b["vitesse_z"] = (v_b * (m_b - m_a) + 2 * m_a * v_a) / (m_a + m_b)
 
-                # Séparation pour éviter qu'elles restent collées
-                penetration = (haut_b - bas_a) / 2
-                etat_a["z"] += penetration
-                etat_b["z"] -= penetration
-                forme_a.params["centre"] = (cx_a, cy_a, etat_a["z"])
-                forme_b.params["centre"] = (cx_b, cy_b, etat_b["z"])
+                # Sépare les formes pour éviter qu'elles restent collées
+                overlap = min(haut_a, haut_b) - max(bas_a, bas_b)
+                etat_a["z"] += overlap / 2
+                etat_b["z"] -= overlap / 2
 
         #------ Animation de la chute libre avec gestion du temps -----#
 
