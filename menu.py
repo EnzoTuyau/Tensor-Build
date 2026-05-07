@@ -24,18 +24,19 @@ if _root not in sys.path:
 class MenuDialog(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TensorBuild - Choix de la simulation")
-        self.setFixedSize(820, 500)
+        self.setWindowTitle("Tensor Build - Choix de la Simulation")
+        self.resize(960, 520)
+        self.setMinimumSize(880, 460)
         self.mode = None
         self.btn_2d = None
         self.btn_3d = None
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(22, 18, 22, 18)
-        root.setSpacing(8)
-
+        root = QVBoxLayout()
+        root.setSpacing(20)
+        root.setContentsMargins(20, 20, 20, 20)
         root.addWidget(self._build_header())
         root.addLayout(self._build_body(), 1)
+        self.setLayout(root)
 
         self.setStyleSheet(
             """
