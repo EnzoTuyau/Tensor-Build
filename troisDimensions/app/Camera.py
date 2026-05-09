@@ -48,6 +48,7 @@ class Camera:
         foc = self.plotter.camera.focal_point
         self.plotter.camera.position = (cam_pos[0]+dx, cam_pos[1]+dy, cam_pos[2]+dz)
         self.plotter.camera.focal_point = (foc[0]+dx, foc[1]+dy, foc[2]+dz)
+        self._contraindre_au_dessus_sol()
         self._derniere_pos_objet = nouvelle_position_objet
 
     def pan(self, direction, pas=1.0):
