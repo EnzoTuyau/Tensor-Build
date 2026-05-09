@@ -1,6 +1,7 @@
 import sys
 import time
 import numpy as np
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QComboBox, QLabel, QDoubleSpinBox,
                                QPushButton, QGroupBox, QFormLayout, QMessageBox)
@@ -39,11 +40,14 @@ class MaterielSimulationApp(QMainWindow):
         scene.sol.afficher()
         scene.camera = Camera(scene.plotter)
         scene.camera.initialiser()
-        # Branche les touches WASD
-        scene.plotter.add_key_event("w", lambda: scene.camera.pan("haut"))
-        scene.plotter.add_key_event("s", lambda: scene.camera.pan("bas"))
-        scene.plotter.add_key_event("a", lambda: scene.camera.pan("gauche"))
-        scene.plotter.add_key_event("d", lambda: scene.camera.pan("droite"))
+        
+        
+        # Contraint la caméra au-dessus du sol après chaque mouvement souris
+        def _on_camera_moved(*args):
+            scene.camera._contraindre_au_dessus_sol()
+
+        scene.plotter.interactor.GetInteractorStyle().AddObserver("InteractionEvent", _on_camera_moved)
+        
         scene.gravite = Gravite()
         scene.layout.addWidget(scene.plotter.interactor, stretch=2)
 
@@ -101,6 +105,9 @@ class MaterielSimulationApp(QMainWindow):
         scene._resize_drag_active = False
         scene._resize_drag_last_y = None
         scene.plotter.interactor.installEventFilter(scene)
+        scene.plotter.interactor.installEventFilter(scene)
+        scene.plotter.interactor.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # reçoit le focus clavier
+        scene.plotter.interactor.setFocus()  # donne le focus immédiatement
         scene._refresh_action_buttons()
 
     def closeEvent(self, event):
@@ -347,7 +354,27 @@ class MaterielSimulationApp(QMainWindow):
             forme.mesh, color="yellow", show_edges=True, reset_camera=False)
 
     def eventFilter(scene, obj, event):
-        if obj is scene.plotter.interactor:
+        # Touches WASD pour la caméra
+        if event.type() == QEvent.KeyPress:  # retire la condition sur obj
+            key = event.text().lower()
+            if key == "w":
+                scene.camera.pan("haut")
+                scene.plotter.render()
+                return True
+            elif key == "s":
+                scene.camera.pan("bas")
+                scene.plotter.render()
+                return True
+            elif key == "a":
+                scene.camera.pan("gauche")
+                scene.plotter.render()
+                return True
+            elif key == "d":
+                scene.camera.pan("droite")
+                scene.plotter.render()
+                return True
+        if obj is scene.plotter.interactor:            
+                
             if event.type() == QEvent.MouseButtonPress and scene.forme_selectionnee is not None:
                 if event.button() == 1:  # clic gauche
                     scene._resize_drag_active = True
