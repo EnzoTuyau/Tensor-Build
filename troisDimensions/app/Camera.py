@@ -1,8 +1,10 @@
 import math
 
-
 class Camera:
-    """Laisse PyVista gérer la caméra nativement."""
+    """Caméra 3D orbitale contrainte au-dessus du sol."""
+
+    SOL_Z = -10.0          # hauteur du sol
+    ELEV_MIN = 2.0         # hauteur minimale de la caméra au-dessus du sol
 
     def __init__(self, plotter, position=(30, 30, 20), focal_point=(0, 0, 0), up=(0, 0, 1)):
         self.plotter = plotter
@@ -16,6 +18,16 @@ class Camera:
         self.plotter.camera.position = self.position_initiale
         self.plotter.camera.focal_point = self.focal_point_initial
         self.plotter.camera.up = self.up_initial
+        # Active la rotation orbitale native de PyVista
+        self.plotter.enable_trackball_style()
+
+    def _contraindre_au_dessus_sol(self):
+        """Empêche la caméra de passer sous le sol."""
+        z_min = self.SOL_Z + self.ELEV_MIN
+        cam_pos = list(self.plotter.camera.position)
+        if cam_pos[2] < z_min:
+            cam_pos[2] = z_min
+            self.plotter.camera.position = tuple(cam_pos)
 
     def sauvegarder(self):
         self._position = self.plotter.camera.position
@@ -64,3 +76,4 @@ class Camera:
             cam_pos[0] += pas; foc[0] += pas
         self.plotter.camera.position = tuple(cam_pos)
         self.plotter.camera.focal_point = tuple(foc)
+        self._contraindre_au_dessus_sol()
