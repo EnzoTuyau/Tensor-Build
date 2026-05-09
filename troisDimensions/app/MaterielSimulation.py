@@ -40,9 +40,10 @@ class MaterielSimulationApp(QMainWindow):
         scene.camera = Camera(scene.plotter)
         scene.camera.initialiser()
         # Contraint la caméra au-dessus du sol après chaque mouvement souris
-        def _on_camera_moved():
+        def _on_camera_moved(*args):
             scene.camera._contraindre_au_dessus_sol()
-        scene.plotter.add_observer("EndInteractionEvent", lambda *_: _on_camera_moved())
+
+        scene.plotter.interactor.GetInteractorStyle().AddObserver("EndInteractionEvent", _on_camera_moved)
         # Branche les touches WASD
         scene.plotter.add_key_event("w", lambda: scene.camera.pan("haut"))
         scene.plotter.add_key_event("s", lambda: scene.camera.pan("bas"))
