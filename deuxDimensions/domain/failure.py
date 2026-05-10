@@ -1,8 +1,9 @@
 """
-Logique pure : seuil de rupture et hysteresis sur l'utilisation von Mises (%).
+Logique pure : seuil de rupture et hysteresis sur l'utilisation (%) par rapport
+a sigma_y (ici : critere uniaxial max |sigma normal|).
 
 Le declenchement utilise un latch pour eviter les re-declenchements tant que
-la contrainte reste au-dessus du seuil ; le rearmement se fait lorsque
+l'utilisation reste au-dessus du seuil ; le rearmement se fait lorsque
 l'utilisation retombe sous le plancher d'hysteresis.
 """
 

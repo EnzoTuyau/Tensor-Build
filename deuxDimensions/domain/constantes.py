@@ -2,6 +2,9 @@
 
 # Physique / temps
 GRAVITY = 9.81  # acceleration gravitationnelle (m/s²)
+# Echelle commune (avec delta_h en m) pour l'allongement visuel de l'ecrasement axial
+# dans le canvas ; doit rester alignee avec _tick_physique / dessiner_contraintes.
+STRESS_DELTA_H_VISUAL_SCALE = 5000.0
 GROUND_Y = 0.0  # position y du sol sur le canvas
 SNAP_TOL = 0.18  # distance max pour considerer deux blocs en contact (m)
 FALL_STEP = 0.12  # distance de chute par tick de physique (m)
@@ -14,7 +17,7 @@ AXIS_YLIM = (-1.5, 12.0)
 # Taille max de la grille "carte de pression" (nombre de mailles par cote)
 HEATMAP_CELLES_MAX = 48
 
-# Feedback utilisation (von Mises vs sigma_y), pourcentages
+# Feedback utilisation (critere uniaxial max |sigma normal| vs sigma_y), pourcentages
 UTIL_PHASE_OK_PCT = 80.0
 UTIL_PHASE_ALERT_PCT = 100.0
 
@@ -25,10 +28,14 @@ FAILURE_UTIL_REARM_PCT = 95.0
 # Reference pour teinter les joints (contrainte normale indicative ~ F/A), Pa
 CONTACT_STRESS_REF_PA = 50e6
 
-# Animation rupture (timer Qt)
+# Animation rupture (timer Qt) : fissures puis ecrasement vers la base puis fondu
 RUPTURE_TICK_MS = 35
-RUPTURE_TOTAL_TICKS = 18
 RUPTURE_CRACK_PHASE_TICKS = 7
+RUPTURE_CRUSH_PHASE_TICKS = 8
+RUPTURE_FADE_PHASE_TICKS = 5
+RUPTURE_TOTAL_TICKS = (
+    RUPTURE_CRACK_PHASE_TICKS + RUPTURE_CRUSH_PHASE_TICKS + RUPTURE_FADE_PHASE_TICKS
+)
 
 # Materiaux : densite (kg/m³), E et sigma_y (Pa), couleurs face/contour
 # Critere cisaillement ductile : tau_lim = sigma_y / sqrt(3) (voir calculs._tau_limite).

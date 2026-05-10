@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from deuxDimensions.domain.constantes import GRAVITY, GROUND_Y, MATERIAUX, SNAP_TOL
+from deuxDimensions.domain.constantes import (
+    GRAVITY,
+    GROUND_Y,
+    MATERIAUX,
+    SNAP_TOL,
+    STRESS_DELTA_H_VISUAL_SCALE,
+)
 from deuxDimensions.domain.geometry import sommets_rectangle_ax
 
 
@@ -94,16 +100,12 @@ def _contraintes_et_detail_bloc(
     sigma_normal_bot = sigma_axial + sig_bas
     sigma_max_normal = max(abs(sigma_normal_top), abs(sigma_normal_bot))
 
-    tau_for_vm = abs(tau_xy_max)
-    sigma_eq_von_mises = (sigma_max_normal**2 + 3.0 * tau_for_vm**2) ** 0.5
-
     sigma_y = mat["sigma_y"]
     tau_lim = _tau_limite(mat)
     util_axial_flex = sigma_max_normal / sigma_y * 100 if sigma_y > 0 else 0.0
     util_shear = abs(tau_xy_max) / tau_lim * 100 if tau_lim > 0 else 0.0
-    util_von_mises = sigma_eq_von_mises / sigma_y * 100 if sigma_y > 0 else 0.0
 
-    statut, sym = _statut_utilisation(util_von_mises)
+    statut, sym = _statut_utilisation(util_axial_flex)
 
     E = mat["E"]
     nu = 0.3
@@ -114,8 +116,8 @@ def _contraintes_et_detail_bloc(
 
     resume = (
         f"  Bloc <b>{i + 1}</b> ({bloc['material']}) : "
-        f"σ<sub>eq</sub> = <b>{sigma_eq_von_mises/1e6:.2f} MPa</b>, "
-        f"<b>{util_von_mises:.0f}%</b> {sym}"
+        f"max |σ normal| = <b>{sigma_max_normal/1e6:.2f} MPa</b>, "
+        f"<b>{util_axial_flex:.0f}%</b> {sym}"
     )
 
     lignes_detail = [
@@ -138,10 +140,9 @@ def _contraintes_et_detail_bloc(
         f"  τ max            : {tau_xy_max/1e6:.4f} MPa",
         f"  τ limite (σ<sub>y</sub>/√3) : {tau_lim/1e6:.3f} MPa — util. cisaillement {util_shear:.1f}%",
         "",
-        "<span style='color:#546e7a'><b>Critère combiné (von Mises, sans torsion)</b></span>",
-        f"  σ<sub>eq</sub> von Mises : {sigma_eq_von_mises/1e6:.3f} MPa",
+        "<span style='color:#546e7a'><b>Critère uniaxial (max |σ normal|, axial + flexion)</b></span>",
         f"  σ<sub>y</sub> limite    : {sigma_y/1e6:.0f} MPa",
-        f"  <b>Utilisation globale : {util_von_mises:.1f}% {statut}</b>",
+        f"  <b>Utilisation globale : {util_axial_flex:.1f}% {statut}</b>",
         "",
         f"  Poids propre   : {poids:.1f} N",
         f"  Charge contact : {f_contact:.1f} N",
@@ -151,24 +152,22 @@ def _contraintes_et_detail_bloc(
     ]
 
     stress = {
-        "sigma_total": sigma_eq_von_mises,
+        "sigma_total": sigma_max_normal,
         "sigma_axial": sigma_axial,
         "sigma_bending_top": sig_haut,
         "sigma_bending_bot": sig_bas,
         "sigma_normal_top": sigma_normal_top,
         "sigma_normal_bot": sigma_normal_bot,
         "sigma_max_normal": sigma_max_normal,
-        "sigma_eq_von_mises": sigma_eq_von_mises,
         "tau_xy_moy": tau_xy_moy,
         "tau_xy_max": tau_xy_max,
         "tau_lim": tau_lim,
         "util_axial_flex": util_axial_flex,
         "util_shear": util_shear,
-        "util_von_mises": util_von_mises,
         "ext_force": f_ext + f_pression,
         "ext_force_x": f_ext_x,
         "pressure": bloc["pressure"],
-        "utilization": util_von_mises,
+        "utilization": util_axial_flex,
         "F_axial": f_axial,
         "delta_h": delta_h,
         "delta_x": delta_x,
@@ -176,7 +175,23 @@ def _contraintes_et_detail_bloc(
     return stress, resume, lignes_detail
 
 
-def _hauteur_appui_max(blocs: list[dict[str, Any]], idx: int) -> float:
+def _hauteur_affichee_ecrasement(h0: float, stress: dict[str, Any] | None) -> float:
+    """
+    Hauteur (m) du polygone bloc telle que rendu sous charge : meme regle que le canvas
+    (h0 - scale * delta_h), pour que la gravite pose les blocs sur le sommet visible.
+    """
+    if stress is None:
+        return h0
+    dh = float(stress.get("delta_h", 0.0))
+    v_dh = dh * STRESS_DELTA_H_VISUAL_SCALE
+    return max(0.01, h0 - v_dh)
+
+
+def _hauteur_appui_max(
+    blocs: list[dict[str, Any]],
+    idx: int,
+    donnees_stress: list[dict[str, Any]] | None = None,
+) -> float:
     """Plus haute surface sous ce bloc : sol ou sommet d'un autre bloc en recouvrement."""
     x_me, y_me, w_me, _ = _geom_patch(blocs[idx])
     plancher_y = GROUND_Y
@@ -184,8 +199,12 @@ def _hauteur_appui_max(blocs: list[dict[str, Any]], idx: int) -> float:
         if i2 == idx:
             continue
         x2, y2, w2, h2 = _geom_patch(rd2)
+        st2 = None
+        if donnees_stress is not None and i2 < len(donnees_stress):
+            st2 = donnees_stress[i2]
+        h2_eff = _hauteur_affichee_ecrasement(h2, st2)
         if x_me < x2 + w2 and x2 < x_me + w_me:
-            sommet2 = y2 + h2
+            sommet2 = y2 + h2_eff
             if sommet2 <= y_me + 0.001:
                 plancher_y = max(plancher_y, sommet2)
     return plancher_y
@@ -366,7 +385,7 @@ def calculer_donnees_physiques(
         entete
         + [
             "<b style='color:#2e7d32'>══ Contraintes sur les blocs ══</b>",
-            "<span style='color:#666;font-size:9px'>Résumé σ<sub>eq</sub> (von Mises) / utilisation globale.</span>",
+            "<span style='color:#666;font-size:9px'>Résumé max |σ normal| (axial + flexion) / utilisation globale.</span>",
         ]
         + resumes
         + ["", "<b style='color:#1565c0'>══ Détail par bloc ══</b>", ""]

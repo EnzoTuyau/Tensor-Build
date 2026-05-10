@@ -22,16 +22,19 @@ from deuxDimensions.domain.constantes import (
     HEATMAP_CELLES_MAX,
     MATERIAUX,
     RUPTURE_CRACK_PHASE_TICKS,
+    RUPTURE_CRUSH_PHASE_TICKS,
+    RUPTURE_FADE_PHASE_TICKS,
     RUPTURE_TICK_MS,
     RUPTURE_TOTAL_TICKS,
     SNAP_TOL,
+    STRESS_DELTA_H_VISUAL_SCALE,
     TIMER_MS,
     UTIL_PHASE_ALERT_PCT,
     UTIL_PHASE_OK_PCT,
 )
 from deuxDimensions.domain import bloc_etat as etat_bloc
 from deuxDimensions.domain.failure import evaluer_latch_rupture
-from deuxDimensions.domain.geometry import sommets_rectangle_ax
+from deuxDimensions.domain.geometry import sommets_quad_depuis_xy_patch, sommets_rectangle_ax
 from deuxDimensions.domain.pressure_field import scalar_field_for_heatmap
 from deuxDimensions.physics.calculs import _geom_patch, _hauteur_appui_max, _resoudre_collision
 from deuxDimensions.rendering.canvas_visuel import (
@@ -57,6 +60,23 @@ _EP_POLY_SELECTION = 3.2
 _EP_POLY_NORMAL = 1.8
 _EP_RECT_CONTOUR_SELECTION = 3.4
 _EP_RECT_CONTOUR_NORMAL = 1.5
+
+
+def _quad_ecrase_vers_base(
+    quad: list[tuple[float, float]], t: float
+) -> list[tuple[float, float]]:
+    """
+    quad : [bas-gauche, bas-droit, haut-droit, haut-gauche].
+    t in [0,1] : 0 inchangé, 1 top ramené sur la base (écrasement).
+    """
+    t = max(0.0, min(1.0, t))
+    q0, q1, q2, q3 = quad[0], quad[1], quad[2], quad[3]
+    return [
+        q0,
+        q1,
+        (q2[0] + (q1[0] - q2[0]) * t, q2[1] + (q1[1] - q2[1]) * t),
+        (q3[0] + (q0[0] - q3[0]) * t, q3[1] + (q0[1] - q3[1]) * t),
+    ]
 
 
 class Canvas2D(FigureCanvasQTAgg):
@@ -117,6 +137,7 @@ class Canvas2D(FigureCanvasQTAgg):
         self._file_rupture: list[int] = []
         self._index_rupture_actif: int | None = None
         self._rupture_tick = 0
+        self._rupture_quad_ref: list[tuple[float, float]] | None = None
         self._artistes_fx_rupture: list = []
         self._segments_fissures: list[tuple[tuple[float, float], tuple[float, float]]] = []
         self._timer_rupture = QTimer()
@@ -375,6 +396,9 @@ class Canvas2D(FigureCanvasQTAgg):
 
         a_bouge = False
         ordre = sorted(range(len(self.blocs)), key=lambda i: self.blocs[i]["y"])
+        stress_cache = self._cache_donnees_stress
+        if len(stress_cache) != len(self.blocs):
+            stress_cache = None
 
         for idx in ordre:
             if idx == self._idx_drag:
@@ -384,7 +408,7 @@ class Canvas2D(FigureCanvasQTAgg):
             patch = bloc["patch"]
             x = bloc["x"]
             y = bloc["y"]
-            plancher = _hauteur_appui_max(self.blocs, idx)
+            plancher = _hauteur_appui_max(self.blocs, idx, stress_cache)
 
             if y > plancher + 0.001:
                 nouvelle_y = max(plancher, y - FALL_STEP)
@@ -589,6 +613,7 @@ class Canvas2D(FigureCanvasQTAgg):
             self._index_rupture_actif = None
             self._vider_fx_rupture()
             self._rupture_tick = 0
+            self._rupture_quad_ref = None
             self._segments_fissures.clear()
         elif self._index_rupture_actif is not None and self._index_rupture_actif > removed_idx:
             self._index_rupture_actif -= 1
@@ -637,7 +662,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
             if i in self._file_rupture:
                 continue
-            util = float(stress.get("utilization", stress.get("util_von_mises", 0.0)))
+            util = float(stress.get("utilization", stress.get("util_axial_flex", 0.0)))
             armed = bool(bloc.get(etat_bloc.CLE_ARMEMENT_RUPTURE, True))
             declenche, nouvel_armed = evaluer_latch_rupture(util, armed)
             bloc[etat_bloc.CLE_ARMEMENT_RUPTURE] = nouvel_armed
@@ -666,7 +691,8 @@ class Canvas2D(FigureCanvasQTAgg):
         self._vider_fx_rupture()
         self._segments_fissures.clear()
         xy = bloc["patch"].get_xy()
-        quad = [tuple(xy[j]) for j in range(min(4, len(xy) - 1))]
+        quad = sommets_quad_depuis_xy_patch(xy)
+        self._rupture_quad_ref = [tuple(p) for p in quad] if len(quad) >= 4 else None
         self._segments_fissures = self._generer_segments_fissures(quad, seed=8200 + idx)
         if not self.animer_rupture or self.reduce_motion:
             self._fin_animation_rupture()
@@ -679,15 +705,23 @@ class Canvas2D(FigureCanvasQTAgg):
             self._timer_rupture.stop()
             self._vider_fx_rupture()
             self._index_rupture_actif = None
+            self._rupture_quad_ref = None
             self._demarrer_traitement_file_rupture()
             return
         bloc = self.blocs[idx]
         patch = bloc["patch"]
         self._rupture_tick += 1
+        t = self._rupture_tick
+
+        n_crack = RUPTURE_CRACK_PHASE_TICKS
+        n_crush = RUPTURE_CRUSH_PHASE_TICKS
+        n_fade = RUPTURE_FADE_PHASE_TICKS
+
         xy = patch.get_xy()
-        quad = [tuple(xy[j]) for j in range(min(4, len(xy) - 1))]
-        if len(quad) >= 4 and self._rupture_tick <= RUPTURE_CRACK_PHASE_TICKS:
-            n_show = min(len(self._segments_fissures), max(1, self._rupture_tick))
+        quad = sommets_quad_depuis_xy_patch(xy)
+
+        if t <= n_crack and len(quad) >= 4:
+            n_show = min(len(self._segments_fissures), max(1, t))
             while len(self._artistes_fx_rupture) < n_show:
                 k = len(self._artistes_fx_rupture)
                 if k >= len(self._segments_fissures):
@@ -703,14 +737,23 @@ class Canvas2D(FigureCanvasQTAgg):
                 )
                 self.axes.add_line(ln)
                 self._artistes_fx_rupture.append(ln)
-        fade_start = max(3, RUPTURE_CRACK_PHASE_TICKS - 1)
-        if self._rupture_tick >= fade_start:
-            denom = max(1, RUPTURE_TOTAL_TICKS - fade_start)
-            t = (self._rupture_tick - fade_start) / denom
-            alpha = max(0.0, 0.92 * (1.0 - min(1.0, t)))
+
+        ref = self._rupture_quad_ref
+        if ref is not None and len(ref) >= 4 and n_crush > 0:
+            if t > n_crack and t <= n_crack + n_crush:
+                crush_lin = (t - n_crack) / float(n_crush)
+                u = crush_lin * crush_lin * (3.0 - 2.0 * crush_lin)
+                squashed = _quad_ecrase_vers_base(ref, u)
+                patch.set_xy(squashed)
+
+        if t > n_crack + n_crush and n_fade > 0:
+            denom = float(n_fade)
+            tf = (t - n_crack - n_crush) / denom
+            alpha = max(0.0, 0.92 * (1.0 - min(1.0, tf)))
             patch.set_alpha(alpha)
             for ln in self._artistes_fx_rupture:
-                ln.set_alpha(max(0.0, 0.85 * (1.0 - min(1.0, t))))
+                ln.set_alpha(max(0.0, 0.85 * (1.0 - min(1.0, tf))))
+
         if self._rupture_tick >= RUPTURE_TOTAL_TICKS:
             self._fin_animation_rupture()
             return
@@ -721,10 +764,18 @@ class Canvas2D(FigureCanvasQTAgg):
         idx = self._index_rupture_actif
         self._index_rupture_actif = None
         self._rupture_tick = 0
+        self._rupture_quad_ref = None
         self._vider_fx_rupture()
         self._segments_fissures.clear()
-        if callable(self._on_rupture_message):
-            self._on_rupture_message("Bloc cassé (von Mises > seuil) — suppression.")
+        msg = ""
+        if idx is not None and 0 <= idx < len(self.blocs):
+            b = self.blocs[idx]
+            msg = (
+                f"Le bloc {idx + 1} ({b['material']}) s'est brisé — "
+                "contrainte normale maximale au-delà du seuil."
+            )
+        if callable(self._on_rupture_message) and msg:
+            self._on_rupture_message(msg)
         if idx is not None and 0 <= idx < len(self.blocs):
             self.supprimer_bloc(idx, notifier=False)
             self._notifier()
@@ -756,8 +807,8 @@ class Canvas2D(FigureCanvasQTAgg):
         Couche contraintes : carte scalaire (σ normale + charge répartie, Pa)
         ou barres RdYlGn selon sigma. Joints cliquables, effort affiche.
         """
-        # Configuration de l'animation
-        VISUAL_SCALE = 5000.0
+        # Configuration de l'animation (delta_h en m, meme echelle que la gravite / appui)
+        v_scale = STRESS_DELTA_H_VISUAL_SCALE
         self._verrouiller_vue()
         vider_serie_artists(self._images_chaleur)
         if not self.carte_chaleur:
@@ -808,11 +859,13 @@ class Canvas2D(FigureCanvasQTAgg):
             for bloc, stress in zip(self.blocs, donnees_stress):
                 if stress is None:
                     continue
+                if bloc.get(etat_bloc.CLE_RUPTURE_EN_COURS):
+                    continue
                 h0 = bloc["h0"]
                 w = bloc["largeur"]
                 x, y = bloc["x"], bloc["y"]
                 dh = stress.get("delta_h", 0.0)
-                v_dh = dh * VISUAL_SCALE
+                v_dh = dh * v_scale
                 h_animee = max(0.01, h0 - v_dh)
                 nx = max(2, min(HEATMAP_CELLES_MAX, int(w * 10)))
                 ny = max(2, min(HEATMAP_CELLES_MAX, int(h_animee * 10)))
@@ -839,8 +892,8 @@ class Canvas2D(FigureCanvasQTAgg):
             dh = stress.get("delta_h", 0.0)
             dx = stress.get("delta_x", 0.0)
 
-            v_dh = dh * VISUAL_SCALE
-            v_dx = dx * VISUAL_SCALE
+            v_dh = dh * v_scale
+            v_dx = dx * v_scale
 
             h_animee = max(0.01, h0 - v_dh)
 
@@ -850,17 +903,17 @@ class Canvas2D(FigureCanvasQTAgg):
                 (x + w + v_dx, y + h_animee),
                 (x + v_dx, y + h_animee),
             ]
-            bloc["patch"].set_xy(nouveaux_points)
+            breaking = bool(bloc.get(etat_bloc.CLE_RUPTURE_EN_COURS))
+            if not breaking:
+                bloc["patch"].set_xy(nouveaux_points)
+            h = h_animee if not breaking else h0
 
-            h = h_animee
-
-            util = float(stress.get("utilization", stress.get("util_von_mises", 0.0)))
+            util = float(stress.get("utilization", stress.get("util_axial_flex", 0.0)))
             bloc[etat_bloc.CLE_DERNIER_UTIL_DESSIN] = util
             mp_mat = MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])
             ec = bloc.get("edgecolor") or mp_mat["edge"]
             fc_u, ec_u = teintes_face_et_contour_selon_util(mp_mat["face"], ec, util)
             bloc[etat_bloc.CLE_CONTOUR_UTIL_DESSIN] = ec_u
-            breaking = bool(bloc.get(etat_bloc.CLE_RUPTURE_EN_COURS))
             if not breaking:
                 bloc["patch"].set_facecolor(fc_u)
                 bloc["patch"].set_alpha(0.9)

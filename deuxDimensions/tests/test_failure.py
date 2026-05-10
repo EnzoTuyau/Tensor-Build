@@ -1,4 +1,4 @@
-"""Tests seuil / hysteresis rupture (von Mises %)."""
+"""Tests seuil / hysteresis rupture (pourcentage d'utilisation vs sigma_y)."""
 
 from __future__ import annotations
 

@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDockWidget, QHBoxLayout, QMainWindow, QWidget
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
+    QApplication,
+    QDockWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QVBoxLayout,
+    QWidget,
+)
 
 from deuxDimensions.physics.calculs import calculer_donnees_physiques
 from deuxDimensions.rendering.canvas2d import Canvas2D
@@ -24,14 +33,45 @@ class MaterialSimulationApp(QMainWindow):
         self.setWindowTitle("Tensor Build — Simulateur de Résistance des Matériaux")
         self.resize(1400, 900)
 
+        self._bandeau_rupture = QFrame()
+        self._bandeau_rupture.setObjectName("ruptureBanner")
+        self._bandeau_rupture.setVisible(False)
+        self._bandeau_rupture.setStyleSheet(
+            """
+            #ruptureBanner {
+                background-color: #6a1b1b;
+                border-bottom: 2px solid #c62828;
+            }
+            """
+        )
+        lay_band = QHBoxLayout(self._bandeau_rupture)
+        lay_band.setContentsMargins(14, 10, 14, 10)
+        self._label_bandeau_rupture = QLabel("")
+        self._label_bandeau_rupture.setWordWrap(True)
+        self._label_bandeau_rupture.setStyleSheet(
+            "color: #ffebee; font-weight: 600; font-size: 13px;"
+        )
+        lay_band.addWidget(self._label_bandeau_rupture)
+        self._timer_bandeau_rupture = QTimer(self)
+        self._timer_bandeau_rupture.setSingleShot(True)
+        self._timer_bandeau_rupture.timeout.connect(self._masquer_bandeau_rupture)
+
         central = QWidget()
-        self.setCentralWidget(central)
-        mise_en_page = QHBoxLayout(central)
+        layout_vert = QVBoxLayout(central)
+        layout_vert.setContentsMargins(0, 0, 0, 0)
+        layout_vert.setSpacing(0)
+        layout_vert.addWidget(self._bandeau_rupture)
+
+        zone_principale = QWidget()
+        mise_en_page = QHBoxLayout(zone_principale)
         mise_en_page.setContentsMargins(0, 0, 0, 0)
         mise_en_page.setSpacing(0)
+        layout_vert.addWidget(zone_principale, stretch=1)
+
+        self.setCentralWidget(central)
 
         self.canvas = Canvas2D(
-            central,
+            zone_principale,
             on_blocs_changes=self._on_changed,
             on_rupture_message=self._message_rupture_bloc,
         )
@@ -63,7 +103,13 @@ class MaterialSimulationApp(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
 
+    def _masquer_bandeau_rupture(self):
+        self._bandeau_rupture.setVisible(False)
+
     def _message_rupture_bloc(self, message: str):
+        self._label_bandeau_rupture.setText(message)
+        self._bandeau_rupture.setVisible(True)
+        self._timer_bandeau_rupture.start(9000)
         self.statusBar().showMessage(message, 6500)
 
     def _on_changed(self, *, refresh_list=True):

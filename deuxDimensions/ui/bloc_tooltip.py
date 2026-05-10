@@ -18,7 +18,7 @@ def texte_infobulle_bloc(index: int, bloc: dict[str, Any], stress: dict[str, Any
         f"  Moment : {bloc['moment']:.0f} N·m",
     ]
     if stress:
-        seq = stress.get("sigma_eq_von_mises", stress.get("sigma_total", 0.0))
+        sig_max_n = stress.get("sigma_max_normal", stress.get("sigma_total", 0.0))
         sig_ax = stress.get("sigma_axial", 0.0)
         tau_m = stress.get("tau_xy_moy", 0.0)
         util = stress.get("utilization", 0.0)
@@ -28,7 +28,7 @@ def texte_infobulle_bloc(index: int, bloc: dict[str, Any], stress: dict[str, Any
             f"  F axial total : {stress.get('F_axial', 0.0):.0f} N",
             f"  σ axial : {sig_ax / 1e6:.2f} MPa",
             f"  τ moy : {tau_m / 1e6:.3f} MPa",
-            f"  σeq (von Mises) : {seq / 1e6:.2f} MPa",
+            f"  max |σ normal| : {sig_max_n / 1e6:.2f} MPa",
             f"  Utilisation : {util:.0f} %",
         ]
     else:

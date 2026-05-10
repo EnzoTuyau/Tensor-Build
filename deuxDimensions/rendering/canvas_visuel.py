@@ -32,7 +32,7 @@ def melanger_hex(ca: str, cb: str, t: float) -> str:
 
 
 def teintes_face_et_contour_selon_util(face_hex: str, edge_hex: str, util_pct: float) -> tuple[str, str]:
-    """Teinte face et contour selon l'utilisation von Mises (%)."""
+    """Teinte face et contour selon l'utilisation uniaxiale (%) (max |sigma normal| / sigma_y)."""
     if util_pct < UTIL_PHASE_OK_PCT:
         return face_hex, edge_hex
     if util_pct < UTIL_PHASE_ALERT_PCT:
