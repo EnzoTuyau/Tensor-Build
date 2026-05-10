@@ -71,3 +71,6 @@ dump.rdb
 # Temporary files
 tmp/
 temp/ 
+
+/.claude/
+/.cursor/

@@ -27,9 +27,11 @@ def scalar_field_for_heatmap(
     ny: int,
 ) -> np.ndarray:
     """
-    Matrice (ny, nx) : |sigma_normale(y)| + charge répartie modélisée (Pa).
+    Matrice (ny, nx) : |sigma_normale(y)| + charge répartie + concentrations
+    locales des forces F_z / F_x au point d'application (Pa).
 
-    **Modèle pédagogique** : rampe liée à ``pressure`` (max en tête du bloc).
+    **Modèle pédagogique** : rampe liée à ``pressure`` (max en tête du bloc) et
+    points chauds gaussiens autour de l'application de F_z (haut) et F_x (côté).
     **Données RDM** : ``stress`` (sigma_axial) et ``moment`` du bloc pour la flexion.
 
     Ligne iy=0 correspond au bas du bloc (``origin='lower'`` pour imshow).
@@ -42,7 +44,13 @@ def scalar_field_for_heatmap(
     sigma_axial = float(stress.get("sigma_axial", 0.0))
     moment = float(bloc.get("moment", 0.0))
     p_surf = float(bloc.get("pressure", 0.0))
+    f_ext = float(bloc.get("ext_force", 0.0))
+    f_ext_x = float(bloc.get("ext_force_x", 0.0))
+    x_offset = float(bloc.get("ext_force_x_offset", 0.5))
+    y_offset = float(bloc.get("ext_force_x_y_offset", 0.5))
+    side = str(bloc.get("ext_force_x_side", "left"))
 
+    # Profil vertical RDM (axial + flexion) -> broadcast initial
     i_local = (w * h**3) / 12.0
     iy = np.arange(ny, dtype=np.float64)
     y_cell = y_coin_bas + (iy + 0.5) / ny * h
@@ -57,5 +65,33 @@ def scalar_field_for_heatmap(
     surf_term = p_surf * ramp
 
     col = np.abs(sigma_norm) + surf_term
-    field_1d = col.astype(np.float64)
-    return np.broadcast_to(field_1d[:, np.newaxis], (ny, nx)).copy()
+    field = np.broadcast_to(col.astype(np.float64)[:, np.newaxis], (ny, nx)).copy()
+
+    # Contributions locales 2D : noyaux gaussiens en (x_app, y_app), echelle
+    # diffuse sur ~1/3 de la plus petite dimension.
+    if abs(f_ext) > 1e-6 or abs(f_ext_x) > 1e-6:
+        ix_norm = (np.arange(nx, dtype=np.float64) + 0.5) / nx
+        iy_norm = (np.arange(ny, dtype=np.float64) + 0.5) / ny
+        Xn, Yn = np.meshgrid(ix_norm, iy_norm)  # shape (ny, nx), valeurs 0..1
+        scale = max(min(w, h), 1e-3)
+        sigma_kernel = 0.35 * scale
+        # Section transversale (profondeur unitaire) cohérente avec calculs.py
+        section = max(w, 1e-6)
+
+        if abs(f_ext) > 1e-6:
+            # F_z appliquée sur le bord supérieur du bloc en x_norm = x_offset
+            dx_m = (Xn - x_offset) * w
+            dy_m = (Yn - 1.0) * h  # 0 au sommet, négatif vers le bas
+            d_fz = np.hypot(dx_m, dy_m)
+            kernel_fz = np.exp(-((d_fz / sigma_kernel) ** 2))
+            field += (abs(f_ext) / section) * kernel_fz
+
+        if abs(f_ext_x) > 1e-6:
+            x_cote = 0.0 if side == "left" else 1.0
+            dx_m = (Xn - x_cote) * w
+            dy_m = (Yn - y_offset) * h
+            d_fx = np.hypot(dx_m, dy_m)
+            kernel_fx = np.exp(-((d_fx / sigma_kernel) ** 2))
+            field += (abs(f_ext_x) / section) * kernel_fx
+
+    return field

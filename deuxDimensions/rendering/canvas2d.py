@@ -8,7 +8,6 @@ import matplotlib.colors as mcolors
 from matplotlib.cm import ScalarMappable
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyArrowPatch, Polygon, Rectangle
 from PySide6.QtCore import QPoint, QRect, QTimer
 from PySide6.QtGui import QCursor
@@ -18,16 +17,23 @@ from deuxDimensions.domain.constantes import (
     AXIS_XLIM,
     AXIS_YLIM,
     FALL_STEP,
+    GRAVITY,
     GROUND_Y,
     HEATMAP_CELLES_MAX,
     MATERIAUX,
-    RUPTURE_CRACK_PHASE_TICKS,
-    RUPTURE_CRUSH_PHASE_TICKS,
-    RUPTURE_FADE_PHASE_TICKS,
+    RUPTURE_FADE_TICKS,
+    RUPTURE_FALL_TICKS,
+    RUPTURE_SHAKE_AMPLITUDE,
+    RUPTURE_SHAKE_TICKS,
+    RUPTURE_SHARD_COUNT,
+    RUPTURE_SHARD_VX_RANGE,
+    RUPTURE_SHARD_VY_RANGE,
     RUPTURE_TICK_MS,
     RUPTURE_TOTAL_TICKS,
     SNAP_TOL,
     STRESS_DELTA_H_VISUAL_SCALE,
+    STRESS_VISUAL_MAX_COMPRESSION,
+    STRESS_VISUAL_MAX_EXTENSION,
     TIMER_MS,
     UTIL_PHASE_ALERT_PCT,
     UTIL_PHASE_OK_PCT,
@@ -62,21 +68,65 @@ _EP_RECT_CONTOUR_SELECTION = 3.4
 _EP_RECT_CONTOUR_NORMAL = 1.5
 
 
-def _quad_ecrase_vers_base(
-    quad: list[tuple[float, float]], t: float
+def _generer_eclats(
+    quad: list[tuple[float, float]],
+    seed: int,
+    n: int,
+    vx_range: tuple[float, float],
+    vy_range: tuple[float, float],
+) -> list[dict]:
+    """
+    Découpe le quad en n éclats triangulaires (éventail depuis le centre) et leur
+    affecte une vitesse initiale + une vitesse angulaire aléatoires.
+
+    Retourne une liste de dicts: {polygon: [(x,y)...], cx, cy, vx, vy, omega, theta}
+    """
+    if len(quad) < 4:
+        return []
+    rng = np.random.default_rng(seed)
+    cx = sum(p[0] for p in quad[:4]) / 4.0
+    cy = sum(p[1] for p in quad[:4]) / 4.0
+
+    perim: list[tuple[float, float]] = []
+    for a in range(4):
+        b = (a + 1) % 4
+        perim.append(quad[a])
+        perim.append(((quad[a][0] + quad[b][0]) / 2.0, (quad[a][1] + quad[b][1]) / 2.0))
+
+    n = max(3, min(8, n))
+    step = len(perim) / float(n)
+    eclats: list[dict] = []
+    for k in range(n):
+        i0 = int(k * step) % len(perim)
+        i1 = int((k + 1) * step) % len(perim)
+        p0 = perim[i0]
+        p1 = perim[i1]
+        ex = (p0[0] + p1[0] + cx) / 3.0
+        ey = (p0[1] + p1[1] + cy) / 3.0
+        eclats.append(
+            {
+                "polygon": [(cx, cy), p0, p1],
+                "cx": ex,
+                "cy": ey,
+                "vx": float(rng.uniform(*vx_range)),
+                "vy": float(rng.uniform(*vy_range)),
+                "omega": float(rng.uniform(-6.0, 6.0)),
+                "theta": 0.0,
+            }
+        )
+    return eclats
+
+
+def _rotate_around(
+    points: list[tuple[float, float]], cx: float, cy: float, theta: float
 ) -> list[tuple[float, float]]:
-    """
-    quad : [bas-gauche, bas-droit, haut-droit, haut-gauche].
-    t in [0,1] : 0 inchangé, 1 top ramené sur la base (écrasement).
-    """
-    t = max(0.0, min(1.0, t))
-    q0, q1, q2, q3 = quad[0], quad[1], quad[2], quad[3]
-    return [
-        q0,
-        q1,
-        (q2[0] + (q1[0] - q2[0]) * t, q2[1] + (q1[1] - q2[1]) * t),
-        (q3[0] + (q0[0] - q3[0]) * t, q3[1] + (q0[1] - q3[1]) * t),
-    ]
+    c = float(np.cos(theta))
+    s = float(np.sin(theta))
+    out: list[tuple[float, float]] = []
+    for x, y in points:
+        dx, dy = x - cx, y - cy
+        out.append((cx + dx * c - dy * s, cy + dx * s + dy * c))
+    return out
 
 
 class Canvas2D(FigureCanvasQTAgg):
@@ -86,7 +136,7 @@ class Canvas2D(FigureCanvasQTAgg):
     et le rendu visuel des contraintes.
     """
 
-    def __init__(self, parent=None, on_blocs_changes=None, on_rupture_message=None):
+    def __init__(self, parent=None, on_blocs_changes=None, on_rupture=None):
         fig = Figure(figsize=(12, 12), facecolor="white")
         fig.subplots_adjust(left=0.08, bottom=0.08, right=0.99, top=0.99)
 
@@ -111,7 +161,7 @@ class Canvas2D(FigureCanvasQTAgg):
         self._idx_drag = None
         self._offset_drag = None
         self._on_blocs_changes = on_blocs_changes
-        self._on_rupture_message = on_rupture_message
+        self._on_rupture = on_rupture
         self.gravite_active = False
         self.carte_chaleur = False
         self.animer_rupture = True
@@ -127,6 +177,8 @@ class Canvas2D(FigureCanvasQTAgg):
         self._callback_contact = None
         self.selection_charges_au_clic = False
         self._callback_bloc_pour_charges = None
+        self._mode_placement_charge: str | None = None
+        self._callback_placement_charge = None
         self._index_bloc_souligne = None
         self._cache_donnees_stress: list = []
         self._cache_paires_contact: list = []
@@ -138,8 +190,10 @@ class Canvas2D(FigureCanvasQTAgg):
         self._index_rupture_actif: int | None = None
         self._rupture_tick = 0
         self._rupture_quad_ref: list[tuple[float, float]] | None = None
+        self._rupture_anchor_xy: tuple[float, float] | None = None
+        self._rupture_info: dict | None = None
+        self._eclats: list[dict] = []
         self._artistes_fx_rupture: list = []
-        self._segments_fissures: list[tuple[tuple[float, float], tuple[float, float]]] = []
         self._timer_rupture = QTimer()
         self._timer_rupture.setSingleShot(False)
         self._timer_rupture.timeout.connect(self._tick_rupture)
@@ -289,6 +343,46 @@ class Canvas2D(FigureCanvasQTAgg):
         """Callback(index) quand l'utilisateur choisit un bloc pour les charges (sans drag)."""
         self._callback_bloc_pour_charges = callback
 
+    def set_callback_placement_charge(self, callback):
+        """Callback(mode_termine: str) quand l'utilisateur a place une charge via clic."""
+        self._callback_placement_charge = callback
+
+    def activer_mode_placement(self, mode: str | None):
+        """Active/desactive le mode de placement par clic d'une charge.
+
+        ``mode`` ∈ {None, "F_z", "F_x"}. Quand actif, le prochain clic sur un bloc
+        ecrit la position dans le dict du bloc et le mode est desactive (one-shot).
+        """
+        if mode not in (None, "F_z", "F_x"):
+            mode = None
+        self._mode_placement_charge = mode
+        if mode is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+
+    def _appliquer_placement_charge(self, idx: int, xdata: float, ydata: float) -> None:
+        """Ecrit la position normalisee de la charge sur le bloc et sort du mode."""
+        if not (0 <= idx < len(self.blocs)):
+            return
+        mode = self._mode_placement_charge
+        bloc = self.blocs[idx]
+        w = max(1e-6, float(bloc["largeur"]))
+        h = max(1e-6, float(bloc["h0"]))
+        x_norm = (float(xdata) - float(bloc["x"])) / w
+        y_norm = (float(ydata) - float(bloc["y"])) / h
+        x_norm = max(0.0, min(1.0, x_norm))
+        y_norm = max(0.0, min(1.0, y_norm))
+        if mode == "F_z":
+            bloc["ext_force_x_offset"] = x_norm
+        elif mode == "F_x":
+            bloc["ext_force_x_y_offset"] = y_norm
+            bloc["ext_force_x_side"] = "left" if x_norm < 0.5 else "right"
+        self.activer_mode_placement(None)
+        if callable(self._callback_placement_charge):
+            self._callback_placement_charge(mode)
+        self._notifier(refresh_list=False)
+
     def definir_surlignage_bloc(self, index):
         """
         Met en évidence le bloc index (contour du Polygon).
@@ -405,6 +499,8 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
 
             bloc = self.blocs[idx]
+            if bloc.get(etat_bloc.CLE_RUPTURE_EN_COURS):
+                continue
             patch = bloc["patch"]
             x = bloc["x"]
             y = bloc["y"]
@@ -462,10 +558,13 @@ class Canvas2D(FigureCanvasQTAgg):
                 "largeur": largeur,
                 "h0": hauteur,
                 "material": materiau,
-                "density": densite, 
+                "density": densite,
                 "edgecolor": ec,
                 "ext_force": 0.0,
                 "ext_force_x": 0.0,
+                "ext_force_x_offset": 0.5,
+                "ext_force_x_y_offset": 0.5,
+                "ext_force_x_side": "left",
                 "moment": 0.0,
                 "pressure": 0.0,
                 etat_bloc.CLE_MATRICE_THERMIQUE: None,
@@ -531,6 +630,17 @@ class Canvas2D(FigureCanvasQTAgg):
 
     def _souris_appui(self, event):
         if event.inaxes != self.axes or event.button != 1:
+            return
+        # Mode placement de charge : prioritaire sur tout le reste.
+        if self._mode_placement_charge is not None and event.xdata is not None:
+            idx_p = self._tester_clic(event)
+            if idx_p is not None:
+                self._appliquer_placement_charge(idx_p, event.xdata, event.ydata)
+                return
+            # Clic en dehors d'un bloc : sortir du mode sans rien changer.
+            self.activer_mode_placement(None)
+            if callable(self._callback_placement_charge):
+                self._callback_placement_charge(None)
             return
         hit_c = self._tester_clic_contact(event)
         if hit_c is not None and self._callback_contact:
@@ -614,7 +724,9 @@ class Canvas2D(FigureCanvasQTAgg):
             self._vider_fx_rupture()
             self._rupture_tick = 0
             self._rupture_quad_ref = None
-            self._segments_fissures.clear()
+            self._rupture_anchor_xy = None
+            self._rupture_info = None
+            self._eclats.clear()
         elif self._index_rupture_actif is not None and self._index_rupture_actif > removed_idx:
             self._index_rupture_actif -= 1
         new_file: list[int] = []
@@ -626,30 +738,7 @@ class Canvas2D(FigureCanvasQTAgg):
 
     def _vider_fx_rupture(self):
         vider_serie_artists(self._artistes_fx_rupture)
-
-    def _generer_segments_fissures(
-        self, quad: list[tuple[float, float]], seed: int
-    ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-        """Segments milieu des aretes vers centre legerement perturbe (deterministe)."""
-        if len(quad) < 4:
-            return []
-        rng = np.random.default_rng(seed)
-        cx = sum(p[0] for p in quad[:4]) / 4.0
-        cy = sum(p[1] for p in quad[:4]) / 4.0
-        span_x = max(abs(quad[1][0] - quad[0][0]), abs(quad[2][0] - quad[3][0]), 1e-6)
-        span_y = max(abs(quad[3][1] - quad[0][1]), abs(quad[2][1] - quad[1][1]), 1e-6)
-        out: list[tuple[tuple[float, float], tuple[float, float]]] = []
-        for a in range(4):
-            b = (a + 1) % 4
-            mx = (quad[a][0] + quad[b][0]) / 2.0
-            my = (quad[a][1] + quad[b][1]) / 2.0
-            tcx = cx + rng.uniform(-0.04, 0.04) * span_x
-            tcy = cy + rng.uniform(-0.04, 0.04) * span_y
-            out.append(((mx, my), (tcx, tcy)))
-        d1 = ((quad[0][0] + quad[2][0]) / 2.0, (quad[0][1] + quad[2][1]) / 2.0)
-        d2 = ((quad[1][0] + quad[3][0]) / 2.0, (quad[1][1] + quad[3][1]) / 2.0)
-        out.append((d1, d2))
-        return out
+        self._eclats.clear()
 
     def verifier_ruptures_apres_physique(self, donnees_stress: list) -> None:
         """Appele apres calcul des contraintes : enqueue ruptures selon latch."""
@@ -667,6 +756,7 @@ class Canvas2D(FigureCanvasQTAgg):
             declenche, nouvel_armed = evaluer_latch_rupture(util, armed)
             bloc[etat_bloc.CLE_ARMEMENT_RUPTURE] = nouvel_armed
             if declenche:
+                bloc["_util_rupture"] = util
                 self._enfiler_rupture(i)
 
     def _enfiler_rupture(self, idx: int) -> None:
@@ -689,11 +779,23 @@ class Canvas2D(FigureCanvasQTAgg):
         self._index_rupture_actif = idx
         self._rupture_tick = 0
         self._vider_fx_rupture()
-        self._segments_fissures.clear()
+
         xy = bloc["patch"].get_xy()
         quad = sommets_quad_depuis_xy_patch(xy)
         self._rupture_quad_ref = [tuple(p) for p in quad] if len(quad) >= 4 else None
-        self._segments_fissures = self._generer_segments_fissures(quad, seed=8200 + idx)
+        self._rupture_anchor_xy = (bloc["x"], bloc["y"])
+
+        util_pct = float(bloc.get("_util_rupture", 0.0))
+        self._rupture_info = {
+            "idx": idx,
+            "material": bloc.get("material", "?"),
+            "util_pct": util_pct,
+            "x": bloc["x"],
+            "y": bloc["y"],
+            "w": bloc["largeur"],
+            "h": bloc["h0"],
+        }
+
         if not self.animer_rupture or self.reduce_motion:
             self._fin_animation_rupture()
             return
@@ -706,6 +808,7 @@ class Canvas2D(FigureCanvasQTAgg):
             self._vider_fx_rupture()
             self._index_rupture_actif = None
             self._rupture_quad_ref = None
+            self._rupture_anchor_xy = None
             self._demarrer_traitement_file_rupture()
             return
         bloc = self.blocs[idx]
@@ -713,46 +816,69 @@ class Canvas2D(FigureCanvasQTAgg):
         self._rupture_tick += 1
         t = self._rupture_tick
 
-        n_crack = RUPTURE_CRACK_PHASE_TICKS
-        n_crush = RUPTURE_CRUSH_PHASE_TICKS
-        n_fade = RUPTURE_FADE_PHASE_TICKS
-
-        xy = patch.get_xy()
-        quad = sommets_quad_depuis_xy_patch(xy)
-
-        if t <= n_crack and len(quad) >= 4:
-            n_show = min(len(self._segments_fissures), max(1, t))
-            while len(self._artistes_fx_rupture) < n_show:
-                k = len(self._artistes_fx_rupture)
-                if k >= len(self._segments_fissures):
-                    break
-                (x0, y0), (x1, y1) = self._segments_fissures[k]
-                ln = Line2D(
-                    [x0, x1],
-                    [y0, y1],
-                    color="#3e2723",
-                    linewidth=1.6,
-                    alpha=0.85,
-                    zorder=15,
-                )
-                self.axes.add_line(ln)
-                self._artistes_fx_rupture.append(ln)
-
         ref = self._rupture_quad_ref
-        if ref is not None and len(ref) >= 4 and n_crush > 0:
-            if t > n_crack and t <= n_crack + n_crush:
-                crush_lin = (t - n_crack) / float(n_crush)
-                u = crush_lin * crush_lin * (3.0 - 2.0 * crush_lin)
-                squashed = _quad_ecrase_vers_base(ref, u)
-                patch.set_xy(squashed)
+        anchor = self._rupture_anchor_xy
+        if ref is None or anchor is None:
+            self._fin_animation_rupture()
+            return
 
-        if t > n_crack + n_crush and n_fade > 0:
-            denom = float(n_fade)
-            tf = (t - n_crack - n_crush) / denom
-            alpha = max(0.0, 0.92 * (1.0 - min(1.0, tf)))
-            patch.set_alpha(alpha)
-            for ln in self._artistes_fx_rupture:
-                ln.set_alpha(max(0.0, 0.85 * (1.0 - min(1.0, tf))))
+        n_shake = RUPTURE_SHAKE_TICKS
+        n_fall = RUPTURE_FALL_TICKS
+        dt = RUPTURE_TICK_MS / 1000.0
+
+        if t <= n_shake:
+            sign = 1.0 if (t % 2) else -1.0
+            decay = 1.0 - (t - 1) / max(1.0, float(n_shake))
+            offset = sign * RUPTURE_SHAKE_AMPLITUDE * decay
+            shaken = [(p[0] + offset, p[1]) for p in ref]
+            patch.set_xy(shaken)
+            patch.set_edgecolor("#b71c1c")
+            patch.set_alpha(0.85)
+        elif t == n_shake + 1:
+            patch.set_alpha(0.0)
+            self._eclats = _generer_eclats(
+                ref,
+                seed=8200 + idx,
+                n=RUPTURE_SHARD_COUNT,
+                vx_range=RUPTURE_SHARD_VX_RANGE,
+                vy_range=RUPTURE_SHARD_VY_RANGE,
+            )
+            for shard in self._eclats:
+                poly = Polygon(
+                    shard["polygon"],
+                    closed=True,
+                    facecolor=bloc.get("edgecolor", "#7a1f1f"),
+                    edgecolor="#3e2723",
+                    linewidth=1.1,
+                    alpha=0.95,
+                    zorder=14,
+                )
+                self.axes.add_patch(poly)
+                shard["artist"] = poly
+                self._artistes_fx_rupture.append(poly)
+        else:
+            tf = (t - n_shake) / float(n_fall)
+            alpha_phase_start = (n_fall - RUPTURE_FADE_TICKS) / float(n_fall)
+            for shard in self._eclats:
+                shard["vy"] -= GRAVITY * dt
+                shard["cx"] += shard["vx"] * dt
+                shard["cy"] += shard["vy"] * dt
+                shard["theta"] += shard["omega"] * dt
+                base = shard["polygon"]
+                bx = sum(p[0] for p in base) / len(base)
+                by = sum(p[1] for p in base) / len(base)
+                translated = [
+                    (p[0] - bx + shard["cx"], p[1] - by + shard["cy"]) for p in base
+                ]
+                rotated = _rotate_around(
+                    translated, shard["cx"], shard["cy"], shard["theta"]
+                )
+                shard["artist"].set_xy(rotated)
+                if tf > alpha_phase_start:
+                    fade_t = (tf - alpha_phase_start) / max(
+                        1e-6, 1.0 - alpha_phase_start
+                    )
+                    shard["artist"].set_alpha(max(0.0, 0.95 * (1.0 - min(1.0, fade_t))))
 
         if self._rupture_tick >= RUPTURE_TOTAL_TICKS:
             self._fin_animation_rupture()
@@ -762,20 +888,19 @@ class Canvas2D(FigureCanvasQTAgg):
     def _fin_animation_rupture(self) -> None:
         self._timer_rupture.stop()
         idx = self._index_rupture_actif
+        info = self._rupture_info
         self._index_rupture_actif = None
         self._rupture_tick = 0
         self._rupture_quad_ref = None
+        self._rupture_anchor_xy = None
+        self._rupture_info = None
         self._vider_fx_rupture()
-        self._segments_fissures.clear()
-        msg = ""
-        if idx is not None and 0 <= idx < len(self.blocs):
-            b = self.blocs[idx]
-            msg = (
-                f"Le bloc {idx + 1} ({b['material']}) s'est brisé — "
-                "contrainte normale maximale au-delà du seuil."
+        if callable(self._on_rupture) and info is not None:
+            self._on_rupture(
+                info["idx"] + 1,
+                info["material"],
+                info["util_pct"],
             )
-        if callable(self._on_rupture_message) and msg:
-            self._on_rupture_message(msg)
         if idx is not None and 0 <= idx < len(self.blocs):
             self.supprimer_bloc(idx, notifier=False)
             self._notifier()
@@ -893,9 +1018,14 @@ class Canvas2D(FigureCanvasQTAgg):
             dx = stress.get("delta_x", 0.0)
 
             v_dh = dh * v_scale
+            v_dh = max(
+                -h0 * STRESS_VISUAL_MAX_EXTENSION,
+                min(v_dh, h0 * STRESS_VISUAL_MAX_COMPRESSION),
+            )
             v_dx = dx * v_scale
+            v_dx = max(-w * 0.15, min(v_dx, w * 0.15))
 
-            h_animee = max(0.01, h0 - v_dh)
+            h_animee = h0 - v_dh
 
             nouveaux_points = [
                 (x, y),
@@ -1014,7 +1144,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 self._patches_stress.append(sol_sh)
 
             if not breaking and abs(bloc.get("ext_force", 0.0)) > 1e-6:
-                cx = x + w / 2
+                cx = x + w * float(bloc.get("ext_force_x_offset", 0.5))
                 y_top = y + h
                 tail_y = y_top + max(0.28, min(0.75, h * 0.32))
                 fleche = FancyArrowPatch(
@@ -1088,9 +1218,12 @@ class Canvas2D(FigureCanvasQTAgg):
             if not breaking:
                 fx_b = float(bloc.get("ext_force_x", 0.0))
                 if abs(fx_b) > 1e-6:
-                    cy = y + h / 2
+                    cy = y + h * float(bloc.get("ext_force_x_y_offset", 0.5))
+                    side = str(bloc.get("ext_force_x_side", "left"))
                     overhang = max(0.35, min(0.9, w * 0.35))
-                    if fx_b > 0:
+                    # La direction de la flèche dépend de side: depuis l'extérieur
+                    # de la face cliquée vers l'intérieur du bloc.
+                    if side == "left":
                         x_tip, x_tail = x, x - overhang
                     else:
                         x_tip, x_tail = x + w, x + w + overhang

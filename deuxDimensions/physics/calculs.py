@@ -10,6 +10,8 @@ from deuxDimensions.domain.constantes import (
     MATERIAUX,
     SNAP_TOL,
     STRESS_DELTA_H_VISUAL_SCALE,
+    STRESS_VISUAL_MAX_COMPRESSION,
+    STRESS_VISUAL_MAX_EXTENSION,
 )
 from deuxDimensions.domain.geometry import sommets_rectangle_ax
 
@@ -63,6 +65,120 @@ def _statut_utilisation(util_pct: float) -> tuple[str, str]:
     return "❌ RUPTURE", "✗"
 
 
+def _fmt_force(val: float) -> str:
+    """Formatte une force (N) en kN si > 1000, sinon N, avec 1 décimale max."""
+    if abs(val) >= 1000:
+        return f"{val/1000:.1f} kN"
+    return f"{val:.0f} N"
+
+
+def _bloc_carte_detail(
+    *,
+    numero: int,
+    materiau: str,
+    edge_color: str,
+    etat_couleur: str,
+    etat_libelle: str,
+    f_axial: float,
+    poids: float,
+    f_contact: float,
+    f_ext: float,
+    f_pression: float,
+    f_ext_x: float,
+    moment: float,
+    sigma_axial: float,
+    sig_haut: float,
+    sig_bas: float,
+    sigma_max_normal: float,
+    tau_xy_max: float,
+    sigma_y: float,
+    tau_lim: float,
+    util_axial_flex: float,
+    util_shear: float,
+) -> str:
+    """Carte HTML compacte par bloc (lisible dans un QTextEdit dark)."""
+
+    def _ligne(label: str, valeur: str, mute_si_zero: float | None = None) -> str:
+        coul = "#9eb4d9" if (mute_si_zero is not None and abs(mute_si_zero) < 1e-9) else "#eaf2ff"
+        return (
+            f"<tr>"
+            f"<td style='color:#6c7c95;padding:2px 12px 2px 0;'>{label}</td>"
+            f"<td align='right' style='color:{coul};'>{valeur}</td>"
+            f"</tr>"
+        )
+
+    # Charges (toujours utiles à voir : poids, contact, externes)
+    charges_rows = (
+        _ligne("Poids propre",     _fmt_force(poids))
+        + _ligne("Contact",        _fmt_force(f_contact), f_contact)
+        + _ligne("Force ext. F<sub>z</sub>", _fmt_force(f_ext), f_ext)
+        + _ligne("Pression",       _fmt_force(f_pression), f_pression)
+        + _ligne("Force ext. F<sub>x</sub>", _fmt_force(f_ext_x), f_ext_x)
+        + _ligne("Moment",         f"{moment:.0f} N·m", moment)
+        + f"<tr><td colspan='2' style='border-top:1px solid #25304a;padding-top:4px;'>"
+          f"<span style='color:#9eb4d9'>Total axial</span> "
+          f"<span style='float:right;color:#f3f7ff;'><b>{_fmt_force(f_axial)}</b></span>"
+          f"</td></tr>"
+    )
+
+    # Contraintes
+    contraintes_rows = (
+        _ligne("σ axiale",   f"{sigma_axial/1e6:.2f} MPa")
+        + _ligne("σ flex (haut/bas)",
+                 f"{sig_haut/1e6:+.2f} / {sig_bas/1e6:+.2f} MPa",
+                 abs(sig_haut) + abs(sig_bas))
+        + _ligne("σ max |normal|", f"<b style='color:#f3f7ff'>{sigma_max_normal/1e6:.2f} MPa</b>")
+        + _ligne("τ max", f"{tau_xy_max/1e6:.3f} MPa", tau_xy_max)
+        + _ligne("σ<sub>y</sub> · τ<sub>lim</sub>",
+                 f"{sigma_y/1e6:.0f} · {tau_lim/1e6:.0f} MPa")
+    )
+
+    # Util pills
+    def _pill(label: str, pct: float) -> str:
+        if pct < 80:
+            c = "#5ee1a1"
+        elif pct < 100:
+            c = "#ffb43a"
+        else:
+            c = "#ff6b6b"
+        return (
+            f"<span style='color:#9eb4d9'>{label}</span> "
+            f"<span style='color:{c};font-weight:700;'>{pct:.0f}%</span>"
+        )
+
+    pills = (
+        f"<div style='padding:4px 0 0 0;'>"
+        f"{_pill('Axial+flex', util_axial_flex)}"
+        f"<span style='color:#3b4b62;'> · </span>"
+        f"{_pill('Cisaillement', util_shear)}"
+        f"</div>"
+    )
+
+    return (
+        f"<table width='100%' cellspacing='0' cellpadding='0' "
+        f"style='margin:8px 0;border-left:3px solid {edge_color};'>"
+        f"<tr><td colspan='2' style='padding:6px 0 4px 10px;'>"
+        f"<b style='color:#f3f7ff;font-size:12px;'>Bloc {numero}</b>"
+        f"<span style='color:#9eb4d9;'> · {materiau}</span>"
+        f"<span style='float:right;color:{etat_couleur};font-weight:700;'>{etat_libelle}</span>"
+        f"</td></tr>"
+        f"<tr><td colspan='2' style='padding:4px 0 2px 10px;'>"
+        f"<span style='color:#6c7c95;font-size:10px;letter-spacing:1px;'>CHARGES</span>"
+        f"</td></tr>"
+        f"<tr><td colspan='2' style='padding-left:10px;'>"
+        f"<table width='100%' cellspacing='0' cellpadding='0'>{charges_rows}</table>"
+        f"</td></tr>"
+        f"<tr><td colspan='2' style='padding:8px 0 2px 10px;'>"
+        f"<span style='color:#6c7c95;font-size:10px;letter-spacing:1px;'>CONTRAINTES</span>"
+        f"</td></tr>"
+        f"<tr><td colspan='2' style='padding-left:10px;'>"
+        f"<table width='100%' cellspacing='0' cellpadding='0'>{contraintes_rows}</table>"
+        f"</td></tr>"
+        f"<tr><td colspan='2' style='padding-left:10px;'>{pills}</td></tr>"
+        f"</table>"
+    )
+
+
 def _contraintes_et_detail_bloc(
     i: int,
     bloc: dict[str, Any],
@@ -71,7 +187,11 @@ def _contraintes_et_detail_bloc(
     memo_axiale_totale: dict[int, float],
 ) -> tuple[dict[str, Any], str, list[str]]:
     _, _, w, h = _geom_patch(bloc)
-    aire = w * h
+    aire = w * h  # surface de la face (m²) — utilisée pour la masse (volume = aire·1m)
+    # Section transversale (m²) perpendiculaire au flux d'effort axial vertical, en
+    # supposant une profondeur unitaire (1 m). C'est cette section qu'il faut utiliser
+    # pour σ = F/A, pas la surface de la face.
+    section_axiale = w
     mat = MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])
 
     poids = bloc["density"] * aire * GRAVITY
@@ -86,9 +206,9 @@ def _contraintes_et_detail_bloc(
     )
 
     f_axial = poids + f_ext + f_pression + f_contact
-    sigma_axial = f_axial / aire
+    sigma_axial = f_axial / section_axiale if section_axiale > 0 else 0.0
 
-    tau_xy_moy = f_ext_x / aire if aire > 0 else 0.0
+    tau_xy_moy = f_ext_x / section_axiale if section_axiale > 0 else 0.0
     tau_xy_max = 1.5 * tau_xy_moy
 
     moment = bloc["moment"]
@@ -111,44 +231,54 @@ def _contraintes_et_detail_bloc(
     nu = 0.3
     G = E / (2 * (1 + nu))
 
-    delta_h = (f_axial * h) / (E * aire) if aire > 0 and E > 0 else 0.0
-    delta_x = (f_ext_x * h) / (G * aire) if aire > 0 and G > 0 else 0.0
+    # Raccourcissement axial: δ = F·L / (E·A) avec A = section transversale.
+    delta_h = (f_axial * h) / (E * section_axiale) if section_axiale > 0 and E > 0 else 0.0
+    delta_x = (f_ext_x * h) / (G * section_axiale) if section_axiale > 0 and G > 0 else 0.0
+
+    util_max = max(util_axial_flex, util_shear)
+    if util_max < 80:
+        couleur_util, libelle_etat = "#5ee1a1", "OK"
+    elif util_max < 100:
+        couleur_util, libelle_etat = "#ffb43a", "Limite"
+    else:
+        couleur_util, libelle_etat = "#ff6b6b", "Rupture"
 
     resume = (
-        f"  Bloc <b>{i + 1}</b> ({bloc['material']}) : "
-        f"max |σ normal| = <b>{sigma_max_normal/1e6:.2f} MPa</b>, "
-        f"<b>{util_axial_flex:.0f}%</b> {sym}"
+        f"<tr>"
+        f"<td style='padding:4px 0;'><b style='color:#f3f7ff'>Bloc {i + 1}</b>"
+        f"<span style='color:#9eb4d9;'> · {bloc['material']}</span></td>"
+        f"<td align='right' style='color:#eaf2ff;'>"
+        f"<b>{sigma_max_normal/1e6:.1f}</b> "
+        f"<span style='color:#6c7c95;font-size:10px'>MPa</span></td>"
+        f"<td align='right' style='padding-left:10px;color:{couleur_util};'>"
+        f"<b>{util_max:.0f}%</b></td>"
+        f"</tr>"
     )
 
     lignes_detail = [
-        f"<b style='color:#e65100'>── Bloc {i+1} ({bloc['material']}) ──</b>",
-        "<span style='color:#546e7a'><b>Compression / traction axiale</b> (σ<sub>axial</sub> &gt; 0 : compression sous charges descendantes)</span>",
-        f"  F axiale totale : <b>{f_axial:.1f} N</b> (poids + F<sub>z</sub> + pression×w + contact)",
-        f"  σ axiale        : {sigma_axial/1e6:.3f} MPa",
-        "",
-        "<span style='color:#546e7a'><b>Flexion</b></span>",
-        f"  Moment M        : {moment:.1f} N·m",
-        f"  σ flex fibre haut : {sig_haut/1e6:.3f} MPa",
-        f"  σ flex fibre bas  : {sig_bas/1e6:.3f} MPa",
-        f"  σ normal haut (σ<sub>ax</sub>+σ<sub>flex</sub>) : {sigma_normal_top/1e6:.3f} MPa",
-        f"  σ normal bas      : {sigma_normal_bot/1e6:.3f} MPa",
-        f"  max |σ normal| fibres : {sigma_max_normal/1e6:.3f} MPa — util. {util_axial_flex:.1f}% / σ<sub>y</sub>",
-        "",
-        "<span style='color:#546e7a'><b>Cisaillement</b> (effort F<sub>x</sub>, section rect., τ<sub>max</sub> ≈ 1.5 τ<sub>moy</sub>)</span>",
-        f"  F<sub>x</sub>           : {f_ext_x:.1f} N",
-        f"  τ moy            : {tau_xy_moy/1e6:.4f} MPa",
-        f"  τ max            : {tau_xy_max/1e6:.4f} MPa",
-        f"  τ limite (σ<sub>y</sub>/√3) : {tau_lim/1e6:.3f} MPa — util. cisaillement {util_shear:.1f}%",
-        "",
-        "<span style='color:#546e7a'><b>Critère uniaxial (max |σ normal|, axial + flexion)</b></span>",
-        f"  σ<sub>y</sub> limite    : {sigma_y/1e6:.0f} MPa",
-        f"  <b>Utilisation globale : {util_axial_flex:.1f}% {statut}</b>",
-        "",
-        f"  Poids propre   : {poids:.1f} N",
-        f"  Charge contact : {f_contact:.1f} N",
-        f"  Force vert. ext.: {f_ext:.1f} N",
-        f"  Pression       : {f_pression:.1f} N",
-        "",
+        _bloc_carte_detail(
+            numero=i + 1,
+            materiau=bloc["material"],
+            edge_color=bloc.get("edgecolor", "#3b4b62"),
+            etat_couleur=couleur_util,
+            etat_libelle=libelle_etat,
+            f_axial=f_axial,
+            poids=poids,
+            f_contact=f_contact,
+            f_ext=f_ext,
+            f_pression=f_pression,
+            f_ext_x=f_ext_x,
+            moment=moment,
+            sigma_axial=sigma_axial,
+            sig_haut=sig_haut,
+            sig_bas=sig_bas,
+            sigma_max_normal=sigma_max_normal,
+            tau_xy_max=tau_xy_max,
+            sigma_y=sigma_y,
+            tau_lim=tau_lim,
+            util_axial_flex=util_axial_flex,
+            util_shear=util_shear,
+        )
     ]
 
     stress = {
@@ -178,13 +308,14 @@ def _contraintes_et_detail_bloc(
 def _hauteur_affichee_ecrasement(h0: float, stress: dict[str, Any] | None) -> float:
     """
     Hauteur (m) du polygone bloc telle que rendu sous charge : meme regle que le canvas
-    (h0 - scale * delta_h), pour que la gravite pose les blocs sur le sommet visible.
+    (h0 - scale * delta_h), bornee pour eviter la pseudo-disparition du bloc.
     """
     if stress is None:
         return h0
     dh = float(stress.get("delta_h", 0.0))
     v_dh = dh * STRESS_DELTA_H_VISUAL_SCALE
-    return max(0.01, h0 - v_dh)
+    v_dh = max(-h0 * STRESS_VISUAL_MAX_EXTENSION, min(v_dh, h0 * STRESS_VISUAL_MAX_COMPRESSION))
+    return h0 - v_dh
 
 
 def _hauteur_appui_max(
@@ -252,7 +383,13 @@ def _contact_pairs(
 ) -> list[tuple[int, int, float]]:
     """
     Retourne les paires en contact vertical.
+
     Une paire (i_bas, i_haut, fraction) signifie que i_haut repose sur i_bas.
+    Le contact est validé si la base de i_haut tombe dans la plage logique du sommet
+    de i_bas (du sommet réel ``yi + hi`` jusqu'au sommet écrasé ``yi``), avec une
+    marge ``tol``. Cela rend la détection insensible à la compression visuelle
+    capée du bloc support, et évite que les blocs supérieurs « traversent » un
+    bloc écrasé sans qu'aucune force ne soit transmise.
     """
     paires: list[tuple[int, int, float]] = []
     for i in range(len(blocs)):
@@ -263,8 +400,9 @@ def _contact_pairs(
             xi, yi, wi, hi = _geom_patch(blocs[i])
             xj, yj, wj, hj = _geom_patch(blocs[j])
 
-            contact_vertical = abs((yi + hi) - yj) <= tol
-            if contact_vertical and _overlaps_x(blocs[i], blocs[j]):
+            sommet_min = yi + hi - hi * STRESS_VISUAL_MAX_COMPRESSION
+            sommet_max = yi + hi + tol
+            if sommet_min <= yj <= sommet_max and _overlaps_x(blocs[i], blocs[j]):
                 largeur_contact = min(xi + wi, xj + wj) - max(xi, xj)
                 fraction = largeur_contact / min(wi, wj)
                 paires.append((i, j, fraction))
@@ -345,59 +483,91 @@ def calculer_donnees_physiques(
         }
 
     aire_totale, xg, yg, ixx, iyy, masse = _statistiques_globales_section(blocs)
-    entete = [
-        "<b style='color:#1565c0'>══ Section globale ══</b>",
-        f"Aire totale : <b>{aire_totale:.4f} m²</b>",
-        f"CG (section) : <b>({xg:.3f}, {yg:.3f}) m</b>",
-        f"Ixx (global) : <b>{ixx:.4f} m⁴</b>",
-        f"Iyy (global) : <b>{iyy:.4f} m⁴</b>",
-        f"Masse linéique : <b>{masse:.1f} kg/m</b>",
-        "",
-    ]
 
     paires = _contact_pairs(blocs) if gravite_active else []
     memo_axiale_totale: dict[int, float] = {}
     donnees_stress: list[dict[str, Any]] = []
-    resumes = []
-    lignes_detail = []
+    resumes_rows: list[str] = []
+    lignes_detail: list[str] = []
 
     for i, bloc in enumerate(blocs):
-        stress, resume, detail_fragments = _contraintes_et_detail_bloc(
+        stress, resume_row, detail_fragments = _contraintes_et_detail_bloc(
             i, bloc, blocs, paires, memo_axiale_totale
         )
         donnees_stress.append(stress)
-        resumes.append(resume)
+        resumes_rows.append(resume_row)
         lignes_detail.extend(detail_fragments)
 
-    lignes_contact = []
-    if paires:
-        lignes_contact.append("<b style='color:#ff6f00'>══ Contacts détectés ══</b>")
-        for ib, ih, frac in paires:
-            fc = donnees_stress[ih]["F_axial"]
-            lignes_contact.append(
-                f"  Bloc {ih+1} (sup.) → Bloc {ib+1} (inf.) : "
-                f"<b>{fc:.0f} N</b> — recouvrement "
-                f"<b>{frac*100:.0f}%</b> de la largeur du plus petit bloc"
-            )
-        lignes_contact.append("")
-
-    rapport = (
-        entete
-        + [
-            "<b style='color:#2e7d32'>══ Contraintes sur les blocs ══</b>",
-            "<span style='color:#666;font-size:9px'>Résumé max |σ normal| (axial + flexion) / utilisation globale.</span>",
-        ]
-        + resumes
-        + ["", "<b style='color:#1565c0'>══ Détail par bloc ══</b>", ""]
-        + lignes_detail
-        + lignes_contact
+    entete_html = (
+        "<div style='padding:2px 0 8px 0;'>"
+        "<span style='color:#6c7c95;font-size:10px;letter-spacing:1.2px;'>"
+        "SECTION GLOBALE</span>"
+        "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:6px;'>"
+        f"<tr><td style='color:#9eb4d9;padding:2px 0;'>Aire</td>"
+        f"<td align='right' style='color:#eaf2ff;'>{aire_totale:.3f} m²</td></tr>"
+        f"<tr><td style='color:#9eb4d9;padding:2px 0;'>Masse linéique</td>"
+        f"<td align='right' style='color:#eaf2ff;'>{masse:.0f} kg/m</td></tr>"
+        f"<tr><td style='color:#9eb4d9;padding:2px 0;'>I<sub>xx</sub> / I<sub>yy</sub></td>"
+        f"<td align='right' style='color:#eaf2ff;'>"
+        f"{ixx:.3f} / {iyy:.3f} m⁴</td></tr>"
+        "</table>"
+        "</div>"
     )
 
+    resume_html = (
+        "<div style='padding:8px 0 4px 0;'>"
+        "<span style='color:#6c7c95;font-size:10px;letter-spacing:1.2px;'>"
+        "RÉSUMÉ PAR BLOC</span>"
+        "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:6px;'>"
+        + "".join(resumes_rows)
+        + "</table>"
+        "</div>"
+    )
+
+    contacts_html = ""
+    if paires:
+        rows = []
+        for ib, ih, frac in paires:
+            fc = donnees_stress[ih]["F_axial"]
+            rows.append(
+                f"<tr>"
+                f"<td style='color:#9eb4d9;padding:2px 0;'>"
+                f"<b style='color:#f3f7ff'>{ih + 1}</b> "
+                f"<span style='color:#6c7c95'>→</span> "
+                f"<b style='color:#f3f7ff'>{ib + 1}</b>"
+                f"</td>"
+                f"<td align='right' style='color:#eaf2ff;'>{_fmt_force(fc)}</td>"
+                f"<td align='right' style='color:#9eb4d9;padding-left:10px;'>"
+                f"{frac*100:.0f}%</td>"
+                f"</tr>"
+            )
+        contacts_html = (
+            "<div style='padding:10px 0 4px 0;'>"
+            "<span style='color:#6c7c95;font-size:10px;letter-spacing:1.2px;'>"
+            "CONTACTS</span>"
+            "<table width='100%' cellspacing='0' cellpadding='0' style='margin-top:6px;'>"
+            + "".join(rows)
+            + "</table>"
+            "</div>"
+        )
+
+    detail_html = (
+        "<div style='padding:10px 0 4px 0;'>"
+        "<span style='color:#6c7c95;font-size:10px;letter-spacing:1.2px;'>"
+        "DÉTAIL</span>"
+        + "".join(lignes_detail)
+        + "</div>"
+    )
+
+    rapport = entete_html + resume_html + contacts_html + detail_html
+
     html_cdgr = (
-        "<div style='padding:4px;'>"
-        "<b style='color:#f9a825'>⊕ Centre de gravité</b><br><br>"
-        "<span style='color:#555'>Position (x, y) en mètres<br>"
-        f"<b style='color:#e65100;font-size:13px'>({xg:.2f}, {yg:.2f})</b>"
+        "<div>"
+        "<span style='color:#9eb4d9;font-size:10px;letter-spacing:1.2px;'>"
+        "CENTRE DE GRAVITÉ</span><br>"
+        f"<span style='color:#f3f7ff;font-size:17px;font-weight:700;'>"
+        f"({xg:.2f}, {yg:.2f})</span> "
+        "<span style='color:#9eb4d9;font-size:11px;'>m</span>"
         "</div>"
     )
 
@@ -405,5 +575,5 @@ def calculer_donnees_physiques(
         "donnees_stress": donnees_stress,
         "paires": paires,
         "html_cdgr": html_cdgr,
-        "html_rapport": "<br>".join(rapport),
+        "html_rapport": rapport,
     }
