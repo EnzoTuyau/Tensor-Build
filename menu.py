@@ -1,6 +1,6 @@
 from troisDimensions.app.MaterielSimulation import MaterielSimulationApp as App3D
 from deuxDimensions.app.tensor2d import MaterialSimulationApp as App2D
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -24,18 +24,19 @@ if _root not in sys.path:
 class MenuDialog(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TensorBuild - Choix de la simulation")
-        self.setFixedSize(820, 500)
+        self.setWindowTitle("Tensor Build - Choix de la Simulation")
+        self.resize(960, 520)
+        self.setMinimumSize(880, 460)
         self.mode = None
         self.btn_2d = None
         self.btn_3d = None
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(22, 18, 22, 18)
-        root.setSpacing(8)
-
+        root = QVBoxLayout()
+        root.setSpacing(20)
+        root.setContentsMargins(20, 20, 20, 20)
         root.addWidget(self._build_header())
         root.addLayout(self._build_body(), 1)
+        self.setLayout(root)
 
         self.setStyleSheet(
             """
@@ -201,14 +202,20 @@ class GestionnaireApplication:
         self.current_window = App2D(mode="2D", switch_callback=self.open_3d)
         self.current_window.show()
         if old:
-            old.close()
+            # Cacher l’ancienne (VTK ou matplotlib) + traiter la file d’événements
+            # avant de détruire : sinon conflit de contexte GL (segfault fréquent sur macOS).
+            old.hide()
+            QApplication.processEvents()
+            QTimer.singleShot(0, old.close)
 
     def open_3d(self):
         old = self.current_window
         self.current_window = App3D(switch_callback=self.open_2d)
         self.current_window.show()
         if old:
-            old.close()
+            old.hide()
+            QApplication.processEvents()
+            QTimer.singleShot(0, old.close)
 
 
 if __name__ == "__main__":
