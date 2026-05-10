@@ -75,7 +75,48 @@ class MaterielSimulationApp(QMainWindow):
                 border: 1px solid #2f4d72;
                 border-radius: 4px;
                 padding: 2px;
+                min-height: 24px;
             }
+
+            QDoubleSpinBox::up-button {
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 18px;
+                height: 12px;
+                background: #1a3a5c;
+                border: none;
+                border-left: 1px solid #2f4d72;
+                border-bottom: 1px solid #2f4d72;
+            }
+            QDoubleSpinBox::up-button:hover  { background: #0d8bff; }
+            QDoubleSpinBox::up-button:pressed { background: #0a6fd4; }
+
+            QDoubleSpinBox::down-button {
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 18px;
+                height: 12px;
+                background: #1a3a5c;
+                border: none;
+                border-left: 1px solid #2f4d72;
+                border-top: 1px solid #2f4d72;
+            }
+            QDoubleSpinBox::down-button:hover  { background: #0d8bff; }
+            QDoubleSpinBox::down-button:pressed { background: #0a6fd4; }
+
+            QDoubleSpinBox::up-arrow {
+                width: 0px; height: 0px;
+                border-left:  4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid #eaf2ff;
+            }
+            QDoubleSpinBox::down-arrow {
+                width: 0px; height: 0px;
+                border-left:  4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #eaf2ff;
+            }
+
             QPushButton {
                 background: #0d8bff;
                 color: #ffffff;
@@ -85,11 +126,7 @@ class MaterielSimulationApp(QMainWindow):
                 font-weight: bold;
             }
             QPushButton:hover { background: #2c9bff; }
-            QPushButton[variant="secondary"] {
-                background: #0d8bff;
-                color: #ffffff;
-                border: none;
-            }
+            QPushButton[variant="secondary"] { background: #0d8bff; color: #ffffff; border: none; }
             QPushButton[variant="secondary"]:hover { background: #2c9bff; }
             QPushButton[variant="danger"] { background: #9b2432; color: #ffffff; border: none; }
             QPushButton[variant="danger"]:hover { background: #b12b3a; }
@@ -739,7 +776,7 @@ class MaterielSimulationApp(QMainWindow):
             )
 
         scene.plotter.add_scalar_bar(
-            title="Contrainte de compression (MPa)",
+            title="Contrainte (MPa)",
             color="white"
         )
         scene.plotter.render()
