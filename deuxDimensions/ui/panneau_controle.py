@@ -1,26 +1,25 @@
-"""Panneau de controle Qt du simulateur 2D."""
+"""Panneau de controle Qt du simulateur 2D (design moderne)."""
 
 from __future__ import annotations
 
 import functools
 
-from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtCore import QPoint, QSize, QTimer, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
     QScrollArea,
-    QTabWidget,
+    QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -29,18 +28,284 @@ from deuxDimensions.domain.constantes import MATERIAUX
 from deuxDimensions.ui.contact_tooltip import ContactTooltip
 
 
+# ─── Palette ────────────────────────────────────────────────────
+BG          = "#f7f8fa"
+CARD        = "#ffffff"
+BORDER      = "#e6e8ee"
+TEXT        = "#1f2937"
+MUTED       = "#6b7280"
+ACCENT      = "#2563eb"
+ACCENT_HOV  = "#1d4ed8"
+ACCENT_SOFT = "#eff4ff"
+DANGER      = "#dc2626"
+SUCCESS     = "#16a34a"
+WARNING     = "#d97706"
+
+
+PANEL_QSS = f"""
+QFrame#panel {{
+    background: {BG};
+}}
+
+QLabel {{
+    color: {TEXT};
+    font-size: 12px;
+}}
+QLabel[role="title"] {{
+    color: {TEXT};
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}}
+QLabel[role="section"] {{
+    color: {MUTED};
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+}}
+QLabel[role="muted"] {{
+    color: {MUTED};
+    font-size: 11px;
+}}
+
+QFrame[role="card"] {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+}}
+
+QPushButton {{
+    background: {ACCENT};
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QPushButton:hover    {{ background: {ACCENT_HOV}; }}
+QPushButton:pressed  {{ background: {ACCENT_HOV}; }}
+QPushButton:disabled {{ background: #d1d5db; color: #f3f4f6; }}
+
+QPushButton[variant="ghost"] {{
+    background: transparent;
+    color: {ACCENT};
+    border: 1px solid {BORDER};
+}}
+QPushButton[variant="ghost"]:hover {{
+    background: {ACCENT_SOFT};
+    border-color: {ACCENT};
+}}
+
+QPushButton[variant="danger-icon"] {{
+    background: transparent;
+    color: {MUTED};
+    border: none;
+    border-radius: 6px;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 700;
+}}
+QPushButton[variant="danger-icon"]:hover {{
+    background: #fee2e2;
+    color: {DANGER};
+}}
+
+QPushButton[variant="mode"] {{
+    background: {CARD};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    padding: 9px 12px;
+    text-align: left;
+}}
+QPushButton[variant="mode"]:hover {{
+    border-color: {ACCENT};
+    color: {ACCENT};
+}}
+
+QDoubleSpinBox, QComboBox {{
+    background: {CARD};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 7px;
+    padding: 5px 8px;
+    min-height: 22px;
+    font-size: 12px;
+    selection-background-color: {ACCENT_SOFT};
+    selection-color: {TEXT};
+}}
+QDoubleSpinBox:focus, QComboBox:focus {{
+    border: 1px solid {ACCENT};
+}}
+QDoubleSpinBox:disabled, QComboBox:disabled {{
+    background: #f3f4f6;
+    color: #9ca3af;
+}}
+QComboBox::drop-down {{ width: 18px; border: none; }}
+
+QListWidget {{
+    background: transparent;
+    border: none;
+    outline: 0;
+}}
+QListWidget::item {{
+    background: {CARD};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    margin: 3px 0;
+    padding: 2px;
+}}
+QListWidget::item:selected {{
+    background: {ACCENT_SOFT};
+    border: 1px solid {ACCENT};
+    color: {TEXT};
+}}
+
+/* Toggle-style checkbox */
+QCheckBox {{
+    color: {TEXT};
+    font-size: 12px;
+    spacing: 10px;
+    padding: 2px 0;
+}}
+QCheckBox::indicator {{
+    width: 34px;
+    height: 20px;
+    border-radius: 10px;
+    background: #d1d5db;
+    border: none;
+}}
+QCheckBox::indicator:checked {{
+    background: {ACCENT};
+}}
+
+QScrollArea, QScrollArea > QWidget > QWidget {{
+    background: transparent;
+    border: none;
+}}
+QScrollBar:vertical {{
+    background: transparent; width: 8px; margin: 2px;
+}}
+QScrollBar::handle:vertical {{
+    background: #cfd4dc; border-radius: 4px; min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{ background: #9aa1ac; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+
+QTextEdit {{
+    background: {CARD};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 11px;
+}}
+"""
+
+
+# ─── Toggle moderne (QCheckBox stylé sans cocher carré) ─────────
+from PySide6.QtCore import QPropertyAnimation, Property
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QAbstractButton
+
+
+class ToggleSwitch(QAbstractButton):
+    """Toggle switch moderne, animé (remplace QCheckBox visuellement)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(40, 22)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pos = 2.0
+        self._anim = QPropertyAnimation(self, b"handle_pos", self)
+        self._anim.setDuration(140)
+        self.toggled.connect(self._on_toggle)
+
+    def _on_toggle(self, checked: bool):
+        self._anim.stop()
+        self._anim.setStartValue(self._pos)
+        self._anim.setEndValue(20.0 if checked else 2.0)
+        self._anim.start()
+
+    def get_handle_pos(self):
+        return self._pos
+
+    def set_handle_pos(self, v):
+        self._pos = v
+        self.update()
+
+    handle_pos = Property(float, get_handle_pos, set_handle_pos)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        bg = QColor(ACCENT) if self.isChecked() else QColor("#d1d5db")
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(self.rect(), 11, 11)
+        p.setBrush(QColor("white"))
+        p.drawEllipse(int(self._pos), 2, 18, 18)
+
+    def sizeHint(self):
+        return QSize(40, 22)
+
+
+def _row_toggle(label: str, hint: str | None = None) -> tuple[QWidget, ToggleSwitch]:
+    """Ligne : libelle + toggle a droite (avec petit hint optionnel)."""
+    w = QWidget()
+    lay = QHBoxLayout(w)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(8)
+    txt = QWidget()
+    tlay = QVBoxLayout(txt)
+    tlay.setContentsMargins(0, 0, 0, 0)
+    tlay.setSpacing(2)
+    title = QLabel(label)
+    title.setStyleSheet(f"color:{TEXT}; font-size:12px; font-weight:600;")
+    tlay.addWidget(title)
+    if hint:
+        sub = QLabel(hint)
+        sub.setStyleSheet(f"color:{MUTED}; font-size:10px;")
+        sub.setWordWrap(True)
+        tlay.addWidget(sub)
+    lay.addWidget(txt, stretch=1)
+    sw = ToggleSwitch()
+    lay.addWidget(sw, alignment=Qt.AlignmentFlag.AlignVCenter)
+    return w, sw
+
+
+def _card(title: str | None = None) -> tuple[QFrame, QVBoxLayout]:
+    """Carte UI moderne avec un titre de section optionnel."""
+    card = QFrame()
+    card.setProperty("role", "card")
+    outer = QVBoxLayout(card)
+    outer.setContentsMargins(14, 12, 14, 14)
+    outer.setSpacing(10)
+    if title:
+        lbl = QLabel(title)
+        lbl.setProperty("role", "section")
+        outer.addWidget(lbl)
+    return card, outer
+
+
 def _ligne_liste_bloc(panneau, index: int, libelle: str) -> QWidget:
-    """Une ligne de liste : libelle du bloc + bouton × pour supprimer."""
+    """Carte d'un bloc : libelle + bouton supprimer discret."""
     w = QWidget()
     h = QHBoxLayout(w)
-    h.setContentsMargins(2, 2, 2, 2)
+    h.setContentsMargins(10, 6, 6, 6)
+    h.setSpacing(6)
     lbl = QLabel(libelle)
     lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    lbl.setStyleSheet(f"color:{TEXT}; font-size:12px; font-weight:500;")
     btn = QPushButton("×")
-    btn.setObjectName("btnRemoveRow")
-    btn.setFixedSize(26, 26)
+    btn.setProperty("variant", "danger-icon")
+    btn.setFixedSize(24, 24)
     btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     btn.setToolTip("Supprimer ce bloc")
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.clicked.connect(functools.partial(panneau._supprimer_a_index, index))
     h.addWidget(lbl, stretch=1)
     h.addWidget(btn)
@@ -54,361 +319,165 @@ def _ligne_liste_bloc(panneau, index: int, libelle: str) -> QWidget:
     return w
 
 
-PANEL_QSS = """
-/* Palette alignée sur menu.py TensorBuild (sombre, accents bleu / orange) */
-QFrame {
-    background-color: #050607;
-    border: none;
-}
-QLabel {
-    color: #dbe8ff;
-    background: transparent;
-}
-QLabel#panelMutedHint {
-    color: #7a8fb0;
-    font-size: 11px;
-}
-QLabel#panelRichText {
-    color: #c5d4eb;
-    font-family: 'SF Mono', Menlo, Monaco, monospace;
-    font-size: 10px;
-    background-color: #0a1018;
-    border-radius: 8px;
-    padding: 8px;
-    border: 1px solid #223753;
-}
-QGroupBox {
-    color: #9ec8ff;
-    border: 1px solid #223753;
-    border-radius: 10px;
-    margin-top: 14px;
-    padding-top: 18px;
-    padding-bottom: 10px;
-    padding-left: 12px;
-    padding-right: 12px;
-    font-weight: bold;
-    background-color: #06080c;
-}
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 14px;
-    padding: 0 8px;
-    color: #eaf2ff;
-}
-QPushButton {
-    background-color: #0d1624;
-    color: #eaf2ff;
-    border: 1px solid #3b4b62;
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-weight: 600;
-}
-QPushButton:hover {
-    border: 1px solid #2ea0ff;
-    background-color: #131f31;
-}
-QPushButton:pressed {
-    background-color: #0a1420;
-}
-QPushButton#panelLaunchBtn {
-    background-color: #e67e22;
-    color: #ffffff;
-    border: none;
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 13px;
-    font-weight: 700;
-}
-QPushButton#panelLaunchBtn:hover {
-    background-color: #f08f35;
-    border: none;
-}
-QPushButton#panelLaunchBtn:pressed {
-    background-color: #cf711f;
-    border: none;
-}
-QPushButton#btnRemoveRow {
-    background-color: #2a1518;
-    color: #ff9aa2;
-    border: 1px solid #5c2a32;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 15px;
-    padding: 0px;
-}
-QPushButton#btnRemoveRow:hover {
-    border: 1px solid #ff6b7a;
-    background-color: #3d1f24;
-}
-QListWidget {
-    background-color: #0a1018;
-    color: #eaf2ff;
-    border: 1px solid #2f4d72;
-    border-radius: 8px;
-    padding: 4px;
-    outline: none;
-}
-QListWidget::item {
-    padding: 2px;
-    border-radius: 6px;
-}
-QListWidget::item:selected {
-    background-color: #131f31;
-    border: 1px solid #1f94ff;
-}
-QListWidget::item:hover:!selected {
-    background-color: #0f1723;
-}
-QComboBox,
-QDoubleSpinBox {
-    background-color: #0f1723;
-    color: #eaf2ff;
-    border: 1px solid #2f4d72;
-    border-radius: 6px;
-    padding: 6px 10px;
-    min-height: 20px;
-}
-QComboBox:hover,
-QDoubleSpinBox:hover {
-    border: 1px solid #3d6a9e;
-}
-QComboBox::drop-down {
-    border: none;
-    width: 24px;
-}
-QComboBox QAbstractItemView {
-    background-color: #0f1723;
-    color: #eaf2ff;
-    selection-background-color: #131f31;
-    selection-color: #eaf2ff;
-    border: 1px solid #2f4d72;
-    outline: none;
-}
-QDoubleSpinBox::up-button,
-QDoubleSpinBox::down-button {
-    background-color: #131f31;
-    border: none;
-    width: 20px;
-}
-QDoubleSpinBox::up-button:hover,
-QDoubleSpinBox::down-button:hover {
-    background-color: #1a2840;
-}
-QTabWidget::pane {
-    border: 1px solid #223753;
-    border-radius: 10px;
-    background-color: #06080c;
-    top: -1px;
-    padding: 4px;
-}
-QTabBar::tab {
-    background-color: #0a1018;
-    color: #9eb4d9;
-    padding: 9px 18px;
-    margin-right: 4px;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    border: 1px solid #223753;
-    border-bottom: none;
-}
-QTabBar::tab:selected {
-    background-color: #06080c;
-    color: #eaf2ff;
-    font-weight: bold;
-    border-bottom: 2px solid #1f94ff;
-}
-QTabBar::tab:hover:!selected {
-    background-color: #131f31;
-    color: #dbe8ff;
-}
-QScrollArea {
-    border: none;
-    background-color: transparent;
-}
-QScrollArea > QWidget > QWidget {
-    background-color: transparent;
-}
-QCheckBox {
-    color: #dbe8ff;
-    spacing: 10px;
-    font-weight: 600;
-}
-QCheckBox::indicator {
-    width: 18px;
-    height: 18px;
-    border-radius: 5px;
-    border: 2px solid #3b4b62;
-    background-color: #0f1723;
-}
-QCheckBox::indicator:checked {
-    background-color: #1f94ff;
-    border: 2px solid #1f94ff;
-}
-QCheckBox::indicator:hover {
-    border: 2px solid #2ea0ff;
-}
-QListWidget QWidget {
-    background-color: transparent;
-}
-"""
-
-
 class PanneauControle(QFrame):
-    """Panneau lateral : 3D, gravite, carte de pression, blocs, charges, resultats."""
+    """Panneau lateral moderne : empilement de cartes, sans onglets."""
 
     def __init__(self, canvas, callback_physique, parent=None):
         super().__init__(parent)
+        self.setObjectName("panel")
         self.canvas = canvas
         self.callback_physique = callback_physique
         self._bloc_selectionne = None
         self._contact_sel = None
         self._infobulle_contact = None
         self._construire_ui()
-        self.canvas.set_callback_bloc_pour_charges(self.selectionner_bloc_depuis_canvas)
+
+    # ── Construction UI ─────────────────────────────────────────
 
     def _construire_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        # Conteneur scrollable global
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer.addWidget(scroll)
+
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
         layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
 
-        self.btn_switch_3d = QPushButton("Passer en mode 3D")
-        self.btn_switch_3d.setObjectName("panelLaunchBtn")
-        self.btn_switch_3d.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout.addWidget(self.btn_switch_3d)
+        layout.addWidget(self._header())
+        layout.addWidget(self._card_simulation())
+        layout.addWidget(self._card_nouveau_bloc())
+        layout.addWidget(self._card_liste_blocs())
+        layout.addWidget(self._card_charges())
+        layout.addWidget(self._card_resultats())
+        layout.addStretch(1)
 
-        grp_gravite = QGroupBox("Simulation physique")
-        lay_grav = QVBoxLayout(grp_gravite)
-
-        self.chk_gravite = QCheckBox("Activer la gravité")
-        self.chk_gravite.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.chk_gravite.toggled.connect(self._toggle_gravite)
-        lay_grav.addWidget(self.chk_gravite)
-
-        self.chk_carte_chaleur = QCheckBox("Carte contrainte / charge (Pa)")
-        self.chk_carte_chaleur.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.chk_carte_chaleur.setToolTip(
-            "Champ scalaire sur le bloc : contrainte normale estimée (flexion + axial) "
-            "et rampe liée à la pression surfacique (max en tête). Échelle globale ; "
-            "dégradé bilinéaire ; contour épousé sous cisaillement visuel."
-        )
-        self.chk_carte_chaleur.toggled.connect(self._toggle_carte_chaleur)
-        lay_grav.addWidget(self.chk_carte_chaleur)
-
-        self.chk_animer_rupture = QCheckBox("Animer la rupture (von Mises)")
-        self.chk_animer_rupture.setChecked(True)
-        self.chk_animer_rupture.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.chk_animer_rupture.setToolTip(
-            "Si un bloc dépasse le seuil d'utilisation : fissures et fondu avant suppression. "
-            "Décochez pour une suppression immédiate."
-        )
-        self.chk_animer_rupture.toggled.connect(self._toggle_animer_rupture)
-        lay_grav.addWidget(self.chk_animer_rupture)
-
-        self.chk_reduce_motion = QCheckBox("Réduire les mouvements (accessibilité)")
-        self.chk_reduce_motion.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.chk_reduce_motion.setToolTip(
-            "Pas d'animation de rupture : le bloc est retiré tout de suite si le seuil est franchi."
-        )
-        self.chk_reduce_motion.toggled.connect(self._toggle_reduce_motion)
-        lay_grav.addWidget(self.chk_reduce_motion)
-
-        info_gravite = QLabel(
-            "Quand la gravité est activée : les nouveaux blocs\n"
-            "tombent et s'empilent. Les blocs ne se traversent pas."
-        )
-        info_gravite.setObjectName("panelMutedHint")
-        info_gravite.setWordWrap(True)
-        lay_grav.addWidget(info_gravite)
-
-        grp_gravite.setLayout(lay_grav)
-        layout.addWidget(grp_gravite)
-
-        lbl_hint = QLabel(
-            "<span style='color:#7a8fb0;font-size:11px;line-height:1.35'>"
-            "Cliquez sur une surface de contact pour afficher les détails.<br>"
-            "Survolez un bloc sur le graphe pour voir charges et contraintes (infobulle)."
-            "</span>"
-        )
-        lbl_hint.setWordWrap(True)
-        layout.addWidget(lbl_hint)
-
-        onglets = QTabWidget()
-        self._onglet_blocs(onglets)
-        self._onglet_charges(onglets)
-        self._onglet_resultats(onglets)
-
-        layout.addWidget(onglets)
         self.setStyleSheet(PANEL_QSS)
 
-    def _onglet_blocs(self, onglets: QTabWidget) -> None:
-        tab_blocs = QWidget()
-        lay_blocs = QVBoxLayout(tab_blocs)
+    def _header(self) -> QWidget:
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(2, 2, 2, 0)
+        lay.setSpacing(8)
 
-        grp_nouveau = QGroupBox("Nouveau bloc")
-        form_nouveau = QFormLayout()
+        title = QLabel("Tensor Build")
+        title.setProperty("role", "title")
+        sub = QLabel("Mode 2D")
+        sub.setStyleSheet(f"color:{MUTED}; font-size:11px;")
+
+        left = QWidget()
+        llay = QVBoxLayout(left)
+        llay.setContentsMargins(0, 0, 0, 0)
+        llay.setSpacing(0)
+        llay.addWidget(title)
+        llay.addWidget(sub)
+
+        self.btn_switch_3d = QPushButton("Passer en 3D")
+        self.btn_switch_3d.setProperty("variant", "ghost")
+        self.btn_switch_3d.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        lay.addWidget(left, stretch=1)
+        lay.addWidget(self.btn_switch_3d, alignment=Qt.AlignmentFlag.AlignVCenter)
+        return w
+
+    def _card_simulation(self) -> QFrame:
+        card, lay = _card("Simulation")
+
+        row_g, self.chk_gravite = _row_toggle(
+            "Gravité",
+            "Les blocs tombent et s'empilent.",
+        )
+        self.chk_gravite.toggled.connect(self._toggle_gravite)
+        lay.addWidget(row_g)
+
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background:{BORDER};")
+        lay.addWidget(sep)
+
+        row_h, self.chk_carte_chaleur = _row_toggle(
+            "Carte de pression",
+            "Affiche la pression (Pa) sur chaque bloc.",
+        )
+        self.chk_carte_chaleur.toggled.connect(self._toggle_carte_chaleur)
+        lay.addWidget(row_h)
+
+        hint = QLabel("Cliquez sur une surface de contact pour les détails.")
+        hint.setProperty("role", "muted")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        return card
+
+    def _card_nouveau_bloc(self) -> QFrame:
+        card, lay = _card("Ajouter un bloc")
+
         self.spin_largeur = QDoubleSpinBox()
         self.spin_largeur.setRange(0.1, 20)
         self.spin_largeur.setValue(2)
         self.spin_largeur.setSingleStep(0.25)
+        self.spin_largeur.setSuffix(" m")
+
         self.spin_hauteur = QDoubleSpinBox()
         self.spin_hauteur.setRange(0.1, 20)
         self.spin_hauteur.setValue(1)
         self.spin_hauteur.setSingleStep(0.25)
+        self.spin_hauteur.setSuffix(" m")
+
         self.combo_materiau = QComboBox()
         for nom in MATERIAUX:
             self.combo_materiau.addItem(nom)
-        form_nouveau.addRow("Largeur (m):", self.spin_largeur)
-        form_nouveau.addRow("Hauteur (m):", self.spin_hauteur)
-        form_nouveau.addRow("Matériau:", self.combo_materiau)
-        grp_nouveau.setLayout(form_nouveau)
-        lay_blocs.addWidget(grp_nouveau)
 
-        btn_ajouter = QPushButton("Ajouter bloc")
-        btn_ajouter.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_ajouter.clicked.connect(self._ajouter_bloc)
-        lay_blocs.addWidget(btn_ajouter)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow(self._field_label("Largeur"), self.spin_largeur)
+        form.addRow(self._field_label("Hauteur"), self.spin_hauteur)
+        form.addRow(self._field_label("Matériau"), self.combo_materiau)
+        lay.addLayout(form)
 
-        grp_liste = QGroupBox("Blocs présents")
-        lay_liste = QVBoxLayout(grp_liste)
+        btn = QPushButton("Ajouter bloc")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(self._ajouter_bloc)
+        lay.addWidget(btn)
+        return card
+
+    def _card_liste_blocs(self) -> QFrame:
+        card, lay = _card("Blocs présents")
         self.liste_blocs = QListWidget()
-        self.liste_blocs.setMaximumHeight(180)
+        self.liste_blocs.setMinimumHeight(110)
+        self.liste_blocs.setMaximumHeight(220)
+        self.liste_blocs.setSpacing(0)
+        self.liste_blocs.setFrameShape(QFrame.Shape.NoFrame)
         self.liste_blocs.currentRowChanged.connect(self._selectionner_bloc)
-        lay_liste.addWidget(self.liste_blocs)
-        grp_liste.setLayout(lay_liste)
-        lay_blocs.addWidget(grp_liste)
-        lay_blocs.addStretch()
-        onglets.addTab(tab_blocs, "Blocs")
+        lay.addWidget(self.liste_blocs)
 
-    def _onglet_charges(self, onglets: QTabWidget) -> None:
-        tab_charges = QWidget()
-        lay_charges = QVBoxLayout(tab_charges)
-        grp_charges = QGroupBox("Charges — bloc sélectionné")
-        lay_grp_charges = QVBoxLayout(grp_charges)
+        self.lbl_vide_liste = QLabel("Aucun bloc — ajoutez-en un ci-dessus.")
+        self.lbl_vide_liste.setProperty("role", "muted")
+        self.lbl_vide_liste.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.lbl_vide_liste)
+        return card
 
-        self.chk_selection_graphe = QCheckBox(
-            "Cliquer sur le graphe pour choisir le bloc à charger"
-        )
-        self.chk_selection_graphe.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.chk_selection_graphe.setToolTip(
-            "Active : un clic sur un bloc dans la vue le sélectionne pour les charges "
-            "(sans déplacer le bloc). Sinon : clic-glisser pour déplacer."
-        )
-        self.chk_selection_graphe.toggled.connect(self._toggle_selection_graphe)
-        lay_grp_charges.addWidget(self.chk_selection_graphe)
+    def _card_charges(self) -> QFrame:
+        card, lay = _card("Charges")
 
-        form_charges = QFormLayout()
+        self.lbl_charges_cible = QLabel("Sélectionnez un bloc pour appliquer des charges.")
+        self.lbl_charges_cible.setProperty("role", "muted")
+        self.lbl_charges_cible.setWordWrap(True)
+        lay.addWidget(self.lbl_charges_cible)
 
         self.spin_force = QDoubleSpinBox()
         self.spin_force.setRange(0, 1e7)
         self.spin_force.setSuffix(" N")
         self.spin_force.setSingleStep(10000)
-        self.spin_force_x = QDoubleSpinBox()
-        self.spin_force_x.setRange(-1e7, 1e7)
-        self.spin_force_x.setSuffix(" N")
-        self.spin_force_x.setSingleStep(10000)
-        self.spin_force_x.setToolTip(
-            "Effort horizontal F_x sur le bloc (cisaillement global τ_moy = F_x / A)."
-        )
         self.spin_pression = QDoubleSpinBox()
         self.spin_pression.setRange(0, 1e6)
         self.spin_pression.setSuffix(" Pa")
@@ -418,88 +487,62 @@ class PanneauControle(QFrame):
         self.spin_moment.setSuffix(" N·m")
         self.spin_moment.setSingleStep(100)
         self.spin_force.valueChanged.connect(self._appliquer_charges)
-        self.spin_force_x.valueChanged.connect(self._appliquer_charges)
         self.spin_pression.valueChanged.connect(self._appliquer_charges)
         self.spin_moment.valueChanged.connect(self._appliquer_charges)
 
-        form_charges.addRow("Force ponctuelle (vertical):", self.spin_force)
-        form_charges.addRow("Effort horizontal F_x:", self.spin_force_x)
-        form_charges.addRow("Pression dist.:", self.spin_pression)
-        form_charges.addRow("Moment fléch.:", self.spin_moment)
-        lay_grp_charges.addLayout(form_charges)
-        grp_charges.setLayout(lay_grp_charges)
-        lay_charges.addWidget(grp_charges)
+        form = QFormLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow(self._field_label("Force"), self.spin_force)
+        form.addRow(self._field_label("Pression"), self.spin_pression)
+        form.addRow(self._field_label("Moment"), self.spin_moment)
+        self._charges_form = form
+        lay.addLayout(form)
 
-        btn_appliquer = QPushButton("Appliquer les charges")
-        btn_appliquer.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_appliquer.clicked.connect(self._appliquer_charges)
-        lay_charges.addWidget(btn_appliquer)
-        lay_charges.addStretch()
-        onglets.addTab(tab_charges, "Charges")
+        self._set_charges_enabled(False)
+        return card
 
-    def _onglet_resultats(self, onglets: QTabWidget) -> None:
-        tab_resultats = QWidget()
-        lay_res = QVBoxLayout(tab_resultats)
-        lay_res.setContentsMargins(4, 4, 4, 4)
-        lay_res.setSpacing(8)
+    def _card_resultats(self) -> QFrame:
+        card, lay = _card("Résultats")
 
-        grp_cdgr = QGroupBox("Centre de gravité")
-        lay_cdgr = QVBoxLayout(grp_cdgr)
-        self.lbl_cdgr = QLabel(
-            "<i style='color:#6b7c95'>Ajoutez des blocs pour afficher le CdG.</i>"
-        )
-        self.lbl_cdgr.setObjectName("panelRichText")
+        self.lbl_cdgr = QLabel("<i style='color:#9ca3af'>Ajoutez des blocs pour voir le centre de gravité.</i>")
         self.lbl_cdgr.setWordWrap(True)
         self.lbl_cdgr.setTextFormat(Qt.TextFormat.RichText)
-        scroll_cdgr = QScrollArea()
-        scroll_cdgr.setWidget(self.lbl_cdgr)
-        scroll_cdgr.setWidgetResizable(True)
-        scroll_cdgr.setMaximumHeight(140)
-        lay_cdgr.addWidget(scroll_cdgr)
-        grp_cdgr.setLayout(lay_cdgr)
-        lay_res.addWidget(grp_cdgr)
-
-        grp_detail = QGroupBox("Détail physique & contacts")
-        lay_d = QVBoxLayout(grp_detail)
-        self.lbl_rapport = QLabel(
-            "<i style='color:#6b7c95'>Ajoutez des blocs pour afficher le détail.</i>"
+        self.lbl_cdgr.setStyleSheet(
+            f"background:{ACCENT_SOFT}; color:{TEXT}; border:1px solid {BORDER};"
+            "border-radius:8px; padding:10px; font-size:11px;"
         )
-        self.lbl_rapport.setObjectName("panelRichText")
-        self.lbl_rapport.setWordWrap(True)
-        self.lbl_rapport.setTextFormat(Qt.TextFormat.RichText)
-        scroll_r = QScrollArea()
-        scroll_r.setWidget(self.lbl_rapport)
-        scroll_r.setWidgetResizable(True)
-        scroll_r.setMinimumHeight(200)
-        lay_d.addWidget(scroll_r)
-        grp_detail.setLayout(lay_d)
-        lay_res.addWidget(grp_detail, stretch=1)
+        lay.addWidget(self.lbl_cdgr)
 
-        onglets.addTab(tab_resultats, "Résultats")
+        self.lbl_rapport = QTextEdit()
+        self.lbl_rapport.setReadOnly(True)
+        self.lbl_rapport.setMinimumHeight(220)
+        self.lbl_rapport.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.lbl_rapport.setHtml(
+            "<i style='color:#9ca3af'>Le détail physique apparaîtra ici.</i>"
+        )
+        lay.addWidget(self.lbl_rapport)
+        return card
+
+    def _field_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"color:{MUTED}; font-size:11px; font-weight:600;")
+        return lbl
+
+    def _set_charges_enabled(self, enabled: bool):
+        for w in (self.spin_force, self.spin_pression, self.spin_moment):
+            w.setEnabled(enabled)
+        self.lbl_charges_cible.setVisible(not enabled or self._bloc_selectionne is None)
+
+    # ── Slots / logique ─────────────────────────────────────────
 
     def _toggle_gravite(self, active):
         self.canvas.activer_gravite(active)
-        self.callback_physique()
-
-    def _toggle_selection_graphe(self, active):
-        self.canvas.selection_charges_au_clic = bool(active)
-
-    def selectionner_bloc_depuis_canvas(self, index: int):
-        """Appelé par le canvas : sélectionne le bloc pour l’onglet Charges."""
-        if not (0 <= index < len(self.canvas.blocs)):
-            return
-        self.liste_blocs.setCurrentRow(index)
 
     def _toggle_carte_chaleur(self, active):
-        """Bascule l'affichage carte de pression et relance le calcul / dessin."""
         self.canvas.activer_carte_chaleur(active)
         self.callback_physique()
-
-    def _toggle_animer_rupture(self, active):
-        self.canvas.activer_animer_rupture(bool(active))
-
-    def _toggle_reduce_motion(self, active):
-        self.canvas.activer_reduce_motion(bool(active))
 
     def _ajouter_bloc(self):
         nom_mat = self.combo_materiau.currentText()
@@ -517,72 +560,82 @@ class PanneauControle(QFrame):
 
     def _selectionner_bloc(self, ligne):
         self._bloc_selectionne = ligne
-        self.canvas.definir_surlignage_bloc(ligne if ligne >= 0 else None)
         if 0 <= ligne < len(self.canvas.blocs):
             bloc = self.canvas.blocs[ligne]
-            for spin in (self.spin_force, self.spin_force_x, self.spin_pression, self.spin_moment):
+            for spin in (self.spin_force, self.spin_pression, self.spin_moment):
                 spin.blockSignals(True)
-            try:
-                self.spin_force.setValue(bloc["ext_force"])
-                self.spin_force_x.setValue(bloc.get("ext_force_x", 0.0))
-                self.spin_pression.setValue(bloc["pressure"])
-                self.spin_moment.setValue(bloc["moment"])
-            finally:
-                for spin in (self.spin_force, self.spin_force_x, self.spin_pression, self.spin_moment):
-                    spin.blockSignals(False)
+            self.spin_force.setValue(bloc["ext_force"])
+            self.spin_pression.setValue(bloc["pressure"])
+            self.spin_moment.setValue(bloc["moment"])
+            for spin in (self.spin_force, self.spin_pression, self.spin_moment):
+                spin.blockSignals(False)
+            self._set_charges_enabled(True)
+            self.lbl_charges_cible.setText(
+                f"Bloc <b>{ligne + 1}</b> — {bloc['material']}"
+            )
+            self.lbl_charges_cible.setVisible(True)
+            self.lbl_charges_cible.setStyleSheet(
+                f"color:{TEXT}; font-size:11px;"
+            )
+        else:
+            self._set_charges_enabled(False)
+            self.lbl_charges_cible.setText("Sélectionnez un bloc pour appliquer des charges.")
+            self.lbl_charges_cible.setStyleSheet("")
+            self.lbl_charges_cible.setProperty("role", "muted")
+            self.lbl_charges_cible.style().unpolish(self.lbl_charges_cible)
+            self.lbl_charges_cible.style().polish(self.lbl_charges_cible)
 
     def _appliquer_charges(self):
         ligne = self._bloc_selectionne
         if ligne is not None and 0 <= ligne < len(self.canvas.blocs):
             bloc = self.canvas.blocs[ligne]
             bloc["ext_force"] = self.spin_force.value()
-            bloc["ext_force_x"] = self.spin_force_x.value()
             bloc["pressure"] = self.spin_pression.value()
             bloc["moment"] = self.spin_moment.value()
             self.callback_physique(refresh_list=False)
 
-
     def rafraichir_liste(self):
-        # 1. On mémorise la sélection actuelle
         mem_ligne = self.liste_blocs.currentRow()
-        
-        # 2. On empêche la liste d'envoyer le signal de désélection pendant qu'on la vide
         self.liste_blocs.blockSignals(True)
-        
         self.liste_blocs.clear()
         for i, bloc in enumerate(self.canvas.blocs):
-            libelle = f"[{i+1}] {bloc['material']}  {bloc['largeur']:.1f}×{bloc['h0']:.1f} m"
+            patch = bloc["patch"]
+            libelle = (
+                f"<b>Bloc {i + 1}</b>  ·  {bloc['material']}  ·  "
+                f"{patch.get_width():.1f} × {patch.get_height():.1f} m"
+            )
             row = _ligne_liste_bloc(self, i, libelle)
             item = QListWidgetItem()
             item.setSizeHint(row.sizeHint())
             self.liste_blocs.addItem(item)
             self.liste_blocs.setItemWidget(item, row)
-            
-        # 3. On réactive les signaux
         self.liste_blocs.blockSignals(False)
-        
-        # 4. On restaure la sélection
+
+        empty = len(self.canvas.blocs) == 0
+        self.lbl_vide_liste.setVisible(empty)
+        self.liste_blocs.setVisible(not empty)
+
         if 0 <= mem_ligne < self.liste_blocs.count():
             self.liste_blocs.setCurrentRow(mem_ligne)
             self._bloc_selectionne = mem_ligne
-        else:
+        elif empty:
             self._bloc_selectionne = None
-            self.canvas.definir_surlignage_bloc(None)
-
-    def afficher_rapport_detail(self, html):
-        self.lbl_rapport.setText(html)
+            self._set_charges_enabled(False)
 
     def afficher_cdgr(self, html):
         self.lbl_cdgr.setText(html)
 
+    def afficher_rapport_detail(self, html):
+        self.lbl_rapport.setHtml(html)
+
+    # ── Infobulle de contact (inchangé) ─────────────────────────
+
     def _infobulle_contact_assuree(self):
-        """Cree l'infobulle au premier besoin (parent = canvas)."""
         if self._infobulle_contact is None:
             self._infobulle_contact = ContactTooltip(self.canvas)
         return self._infobulle_contact
 
     def _html_infobulle_contact(self, d):
-        """HTML pour i_bot, i_top, frac, F_c."""
         ib, it = d["i_bot"], d["i_top"]
         frac, fc = d["frac"], d["F_c"]
         return (
@@ -593,7 +646,6 @@ class PanneauControle(QFrame):
         )
 
     def _placer_infobulle_contact(self, tip, centre_contact_global: QPoint):
-        """Centre horizontalement au-dessus du point de contact."""
         tip.adjustSize()
         gap_px = 6
         w, h = tip.width(), tip.height()
@@ -602,7 +654,6 @@ class PanneauControle(QFrame):
         tip.move(tip._clamp_top_left(QPoint(x, y)))
 
     def on_contact_pick(self, d):
-        """Appelé par le canvas : affiche l'infobulle pour le contact d."""
         self._contact_sel = (d["i_bot"], d["i_top"])
         tip = self._infobulle_contact_assuree()
 
@@ -634,7 +685,6 @@ class PanneauControle(QFrame):
         self._contact_sel = None
 
     def rafraichir_infobulle_contact(self, paires, donnees_stress):
-        """Met a jour le texte si la geometrie a change ; sinon masque."""
         tip = self._infobulle_contact
         if tip is None or not tip.isVisible() or self._contact_sel is None:
             return
@@ -647,7 +697,11 @@ class PanneauControle(QFrame):
                     self._masquer_infobulle_contact()
                     return
                 fc = sd["F_axial"]
-                tip.set_rich_text(self._html_infobulle_contact({"i_bot": ib, "i_top": it, "frac": frac, "F_c": fc}))
+                tip.set_rich_text(
+                    self._html_infobulle_contact(
+                        {"i_bot": ib, "i_top": it, "frac": frac, "F_c": fc}
+                    )
+                )
                 tip.adjustSize()
                 self.canvas.rafraichir_position_infobulle_contact(tip)
                 return
