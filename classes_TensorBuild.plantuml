@@ -1,159 +1,376 @@
 @startuml classes_TensorBuild
 set namespaceSeparator none
-class "Camera" as troisDimensions.app.Camera.Camera {
-  focal_point_initial : tuple
-  plotter
-  position_initiale : tuple
-  up_initial : tuple
-  activer_suivi(position_objet)
-  desactiver_suivi()
-  initialiser()
-  pan(direction, pas)
-  reset()
-  restaurer()
-  sauvegarder()
-  suivre_objet(nouvelle_position_objet)
-}
-class "Cube" as troisDimensions.Formes.Cube.Cube {
-  NOM : str
-  construire_mesh()
-}
-class "Cylindre" as troisDimensions.Formes.Cylindre.Cylindre {
-  NOM : str
-  construire_mesh()
-}
-class "Forme" as troisDimensions.Formes.Forme.Forme {
-  actor : NoneType
-  c
-  l
-  mesh : NoneType
-  params
-  r
-  {abstract}construire_mesh()
-}
+
+' ================================================================== '
+'  MENU                                                               '
+' ================================================================== '
+
 class "GestionnaireApplication" as menu.GestionnaireApplication {
-  current_window : MaterialSimulationApp, NoneType
+  current_window : MaterialSimulationApp | MaterielSimulationApp | None
   open_2d()
   open_3d()
 }
+
+class "MenuDialog" as menu.MenuDialog {
+  btn_2d : QPushButton | None
+  btn_3d : QPushButton | None
+  mode : str | None
+  launch_2d()
+  launch_3d()
+}
+
+' ================================================================== '
+'  DEUX DIMENSIONS — APP                                              '
+' ================================================================== '
+
+class "MaterialSimulationApp" as deuxDimensions.app.main_window.MaterialSimulationApp {
+  canvas : Canvas2D
+  panneau : PanneauControle
+  _on_changed(refresh_list)
+  _calculer_physique()
+}
+
+' ================================================================== '
+'  DEUX DIMENSIONS — UI                                               '
+' ================================================================== '
+
+class "PanneauControle" as deuxDimensions.ui.panneau_controle.PanneauControle {
+  canvas : Canvas2D
+  callback_physique
+  btn_switch_3d : QPushButton
+  chk_gravite : QCheckBox
+  chk_carte_chaleur : QCheckBox
+  spin_largeur : QDoubleSpinBox
+  spin_hauteur : QDoubleSpinBox
+  combo_materiau : QComboBox
+  liste_blocs : QListWidget
+  spin_force : QDoubleSpinBox
+  spin_pression : QDoubleSpinBox
+  spin_moment : QDoubleSpinBox
+  lbl_cdgr : QLabel
+  lbl_rapport : QLabel
+  _bloc_selectionne : int | None
+  _contact_sel : tuple | None
+  _infobulle_contact : ContactTooltip | None
+  _construire_ui()
+  _toggle_gravite(active)
+  _toggle_carte_chaleur(active)
+  _ajouter_bloc()
+  _supprimer_a_index(index)
+  _selectionner_bloc(ligne)
+  _appliquer_charges()
+  rafraichir_liste()
+  afficher_cdgr(html)
+  afficher_rapport_detail(html)
+  on_contact_pick(d)
+  rafraichir_infobulle_contact(paires, donnees_stress)
+  _masquer_infobulle_contact()
+  _infobulle_contact_assuree()
+  _placer_infobulle_contact(tip, centre_contact_global)
+  _html_infobulle_contact(d)
+}
+
+class "ContactTooltip" as deuxDimensions.ui.contact_tooltip.ContactTooltip {
+  _bounds : QRect
+  _drag_offset : QPoint | None
+  _lbl : QLabel
+  _btn_close : QPushButton
+  _drag_hint : QWidget
+  set_plot_bounds_global(rect)
+  set_rich_text(html)
+  clamp_to_bounds()
+  _clamp_top_left(top_left)
+  _drag_blocked_widget(child)
+  mousePressEvent(event)
+  mouseMoveEvent(event)
+  mouseReleaseEvent(event)
+  showEvent(event)
+}
+
+' ================================================================== '
+'  DEUX DIMENSIONS — RENDERING                                        '
+' ================================================================== '
+
+class "Canvas2D" as deuxDimensions.rendering.canvas2d.Canvas2D {
+  axes : Axes
+  blocs : list[dict]
+  gravite_active : bool
+  carte_chaleur : bool
+  _idx_drag : int | None
+  _offset_drag : tuple | None
+  _patches_stress : list
+  _artistes_fleches : list
+  _images_chaleur : list
+  _zones_contact_clic : list
+  _patch_sol : Rectangle | None
+  _ligne_sol : Line2D | None
+  _callback_contact
+  _timer_physique : QTimer
+  _on_blocs_changes
+  activer_gravite(active)
+  activer_carte_chaleur(active)
+  ajouter_bloc(largeur, hauteur, materiau, densite)
+  supprimer_bloc(index)
+  dessiner_contraintes(donnees_stress, paires_contact)
+  set_callback_contact_clic(callback)
+  matrice_heatmap_bloc(index)
+  rectangle_axes_global()
+  point_contact_global(hit)
+  rafraichir_position_infobulle_contact(tip)
+  _dessiner_sol()
+  _verrouiller_vue()
+  _tick_physique()
+  _tester_clic(event)
+  _tester_clic_contact(event)
+  _souris_appui(event)
+  _souris_mouvement(event)
+  _souris_relache(event)
+  _notifier(refresh_list)
+  _donnees_vers_global(xd, yd)
+  _souris_vers_global(event)
+}
+
+' ================================================================== '
+'  DEUX DIMENSIONS — PHYSICS                                          '
+' ================================================================== '
+
+class "calculs" as deuxDimensions.physics.calculs {
+  <<module>>
+  _geom_patch(rd)
+  _charge_verticale_equivalente(rd)
+  _hauteur_appui_max(blocs, idx)
+  _statistiques_globales_section(blocs)
+  _statut_utilisation(util_pct)
+  _overlaps_x(bloc_a, bloc_b)
+  _contact_pairs(blocs, tol)
+  _resoudre_collision(idx_mobile, blocs)
+  calculer_donnees_physiques(blocs)
+}
+
+' ================================================================== '
+'  DEUX DIMENSIONS — DOMAIN                                           '
+' ================================================================== '
+
+class "constantes" as deuxDimensions.domain.constantes {
+  <<module>>
+  GRAVITY : float
+  GROUND_Y : float
+  SNAP_TOL : float
+  FALL_STEP : float
+  TIMER_MS : int
+  AXIS_XLIM : tuple
+  AXIS_YLIM : tuple
+  HEATMAP_CELLES_MAX : int
+  MATERIAUX : dict
+}
+
+' ================================================================== '
+'  TROIS DIMENSIONS — APP                                             '
+' ================================================================== '
+
+class "MaterielSimulationApp" as troisDimensions.app.MaterielSimulation.MaterielSimulationApp {
+  objects : list[Forme]
+  switch_callback
+  plotter : SafeQtInteractor
+  camera : Camera
+  sol : Sol
+  gravite : Gravite
+  central_widget : QWidget
+  control_panel : QWidget
+  control_layout : QVBoxLayout
+  layout : QHBoxLayout
+  forme_selectionnee : Forme | None
+  group_geo : QGroupBox
+  materials_db : dict
+  btn_add : QPushButton
+  btn_sim : QPushButton
+  btn_erase : QPushButton
+  btn_inspect : QPushButton
+  btn_resistance : QPushButton
+  btn_resistance_reset : QPushButton
+  btn_switch_2d : QPushButton
+  shape_selector : QComboBox
+  selecteur_materiaux : QComboBox
+  spin_radius : QDoubleSpinBox
+  spin_length : QDoubleSpinBox
+  spin_x : QDoubleSpinBox
+  spin_y : QDoubleSpinBox
+  spin_z : QDoubleSpinBox
+  erase_label : QLabel
+  _resize_drag_active : bool
+  _resize_drag_last_y : float | None
+  _mode_contraintes_actif : bool
+  setup_ui_controls()
+  add_shape()
+  dessiner_forme(forme)
+  update_current_shape()
+  update_materiel()
+  eventFilter(obj, event)
+  run_dummy_simulation()
+  animer_chute(formes)
+  _detecter_collisions(etats)
+  _calculer_et_afficher_heatmap(etats)
+  afficher_resistance()
+  reinitialiser_couleurs()
+  toggle_erase_mode(active)
+  toggle_inspect_mode(active)
+  on_pick(picked_mesh)
+  on_inspect(picked_mesh)
+  on_forme_choisie(index)
+  _refresh_action_buttons()
+  closeEvent(event)
+}
+
+class "Camera" as troisDimensions.app.Camera.Camera {
+  plotter
+  position_initiale : tuple
+  focal_point_initial : tuple
+  up_initial : tuple
+  _suivi_actif : bool
+  _derniere_pos_objet : tuple | None
+  initialiser()
+  sauvegarder()
+  restaurer()
+  reset()
+  activer_suivi(position_objet)
+  desactiver_suivi()
+  suivre_objet(nouvelle_position_objet)
+  pan(direction, pas)
+  _contraindre_au_dessus_sol()
+}
+
+class "SafeQtInteractor" as troisDimensions.app.SafeQtInteractor.SafeQtInteractor {
+  _render_deferred : bool
+  paintEvent(ev)
+  _deferred_render()
+  _deferred_vtk_timer()
+}
+
+' ================================================================== '
+'  TROIS DIMENSIONS — ENVIRONNEMENT                                   '
+' ================================================================== '
+
+class "Sol" as troisDimensions.Environnement.Sol.Sol {
+  plotter
+  hauteur : float
+  taille : int
+  couleur : str
+  opacite : float
+  actor : None
+  afficher()
+  masquer()
+}
+
 class "Gravite" as troisDimensions.Environnement.Gravite.Gravite {
   DENSITES : dict
   g : float
   calculer_masse(forme, materiau)
   calculer_poids(forme, materiau)
   rapport_complet(formes, materiau)
+  _calculer_volume(forme)
 }
-class "Materiau" as materiaux.Materiau {
-  PRESETS : dict
-  densite
-  limite_elastique
-  module_young
-  nom
-  poisson
-  depuis_preset(nom)
+
+' ================================================================== '
+'  TROIS DIMENSIONS — FORMES                                          '
+' ================================================================== '
+
+abstract class "Forme" as troisDimensions.Formes.Forme.Forme {
+  params : dict
+  mesh : None
+  actor : None
+  r
+  l
+  c
+  {abstract} construire_mesh()
 }
-class "MaterielSimulationApp" as troisDimensions.app.MaterielSimulation.MaterielSimulationApp {
-  btn_add
-  btn_erase
-  btn_inspect
-  btn_resistance
-  btn_resistance_reset
-  btn_sim
-  btn_switch_2d
-  camera
-  central_widget
-  control_layout
-  control_panel
-  erase_label
-  forme_selectionnee : NoneType
-  gravite
-  group_geo
-  layout
-  materials_db : dict
-  objects : list
-  plotter : QtInteractor
-  selecteur_materiaux
-  shape_selector
-  sol
-  spin_length
-  spin_radius
-  spin_x
-  spin_y
-  spin_z
-  switch_callback : NoneType
-  add_shape()
-  afficher_resistance()
-  animer_chute(formes)
-  dessiner_forme(forme)
-  eventFilter(obj, event)
-  on_forme_choisie(index)
-  on_inspect(picked_mesh)
-  on_pick(picked_mesh)
-  reinitialiser_couleurs()
-  run_dummy_simulation()
-  setup_ui_controls()
-  toggle_erase_mode(active)
-  toggle_inspect_mode(active)
-  update_current_shape()
-  update_materiel()
+
+class "Cylindre" as troisDimensions.Formes.Cylindre.Cylindre {
+  NOM : str
+  construire_mesh()
 }
-class "MenuDialog" as menu.MenuDialog {
-  btn_2d : NoneType
-  btn_3d : NoneType
-  mode : NoneType, str
-  launch_2d()
-  launch_3d()
-}
+
 class "PoutreCarree" as troisDimensions.Formes.PoutreCarree.PoutreCarree {
   NOM : str
   construire_mesh()
 }
+
 class "PrismeTriangulaire" as troisDimensions.Formes.PrismeTriangulaire.PrismeTriangulaire {
   NOM : str
   construire_mesh()
 }
-class "SafeQtInteractor" as troisDimensions.app.SafeQtInteractor.SafeQtInteractor {
-  paintEvent(ev)
-}
-class "Sol" as troisDimensions.Environnement.Sol.Sol {
-  actor : NoneType
-  couleur : str
-  hauteur : float
-  opacite : float
-  plotter
-  taille : int
-  afficher()
-  masquer()
-}
+
 class "Sphere" as troisDimensions.Formes.Sphere.Sphere {
   NOM : str
   construire_mesh()
 }
-class "Tensor2DPhysique" as Tensor2DPhysique.Tensor2DPhysique {
-  calculer_contraintes(blocs)
-  charge_verticale(bloc)
-  contact_pairs(blocs, tol)
-  geom(bloc)
-  hauteur_appui_max(blocs, idx)
-  overlaps_x(bloc_a, bloc_b)
-  resoudre_collision(idx_mobile, blocs)
-  statistiques_section(blocs)
-  statut_utilisation(util_pct)
-  von_mises(sigma_x, sigma_y, tau_xy)
+
+class "Cube" as troisDimensions.Formes.Cube.Cube {
+  NOM : str
+  construire_mesh()
 }
+
 class "Vis" as troisDimensions.Formes.Vis.Vis {
   NOM : str
   construire_mesh()
 }
-troisDimensions.Formes.Cube.Cube --|> troisDimensions.Formes.Forme.Forme
-troisDimensions.Formes.Cylindre.Cylindre --|> troisDimensions.Formes.Forme.Forme
+
+' ================================================================== '
+'  MATERIAUX                                                          '
+' ================================================================== '
+
+class "Materiau" as materiaux.Materiau {
+  PRESETS : dict
+  nom : str
+  module_young : float
+  densite : float
+  limite_elastique : float
+  poisson : float
+  depuis_preset(nom)
+}
+
+' ================================================================== '
+'  HÉRITAGES                                                          '
+' ================================================================== '
+
+troisDimensions.Formes.Cylindre.Cylindre        --|> troisDimensions.Formes.Forme.Forme
 troisDimensions.Formes.PoutreCarree.PoutreCarree --|> troisDimensions.Formes.Forme.Forme
 troisDimensions.Formes.PrismeTriangulaire.PrismeTriangulaire --|> troisDimensions.Formes.Forme.Forme
-troisDimensions.Formes.Sphere.Sphere --|> troisDimensions.Formes.Forme.Forme
-troisDimensions.Formes.Vis.Vis --|> troisDimensions.Formes.Forme.Forme
-troisDimensions.Environnement.Gravite.Gravite --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : gravite
-troisDimensions.Environnement.Sol.Sol --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : sol
-troisDimensions.app.Camera.Camera --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : camera
-troisDimensions.app.MaterielSimulation.MaterielSimulationApp --* menu.GestionnaireApplication : current_window
-troisDimensions.app.SafeQtInteractor.SafeQtInteractor --* troisDimensions.app.MaterielSimulation.MaterielSimulationApp : plotter
+troisDimensions.Formes.Sphere.Sphere            --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Formes.Cube.Cube                --|> troisDimensions.Formes.Forme.Forme
+troisDimensions.Formes.Vis.Vis                  --|> troisDimensions.Formes.Forme.Forme
+
+' ================================================================== '
+'  RELATIONS — MENU                                                   '
+' ================================================================== '
+
+menu.GestionnaireApplication "1" o-- "0..1" deuxDimensions.app.main_window.MaterialSimulationApp : current_window
+menu.GestionnaireApplication "1" o-- "0..1" troisDimensions.app.MaterielSimulation.MaterielSimulationApp : current_window
+menu.GestionnaireApplication ..> menu.MenuDialog : crée
+
+' ================================================================== '
+'  RELATIONS — MODE 2D                                                '
+' ================================================================== '
+
+deuxDimensions.app.main_window.MaterialSimulationApp *-- deuxDimensions.rendering.canvas2d.Canvas2D : canvas
+deuxDimensions.app.main_window.MaterialSimulationApp *-- deuxDimensions.ui.panneau_controle.PanneauControle : panneau
+deuxDimensions.app.main_window.MaterialSimulationApp ..> deuxDimensions.physics.calculs : utilise
+
+deuxDimensions.ui.panneau_controle.PanneauControle o-- deuxDimensions.rendering.canvas2d.Canvas2D : canvas
+deuxDimensions.ui.panneau_controle.PanneauControle o-- "0..1" deuxDimensions.ui.contact_tooltip.ContactTooltip : _infobulle_contact
+
+deuxDimensions.rendering.canvas2d.Canvas2D ..> deuxDimensions.physics.calculs : utilise
+deuxDimensions.rendering.canvas2d.Canvas2D ..> deuxDimensions.domain.constantes : utilise
+
+deuxDimensions.physics.calculs ..> deuxDimensions.domain.constantes : utilise
+
+' ================================================================== '
+'  RELATIONS — MODE 3D                                                '
+' ================================================================== '
+
+troisDimensions.app.MaterielSimulation.MaterielSimulationApp *-- troisDimensions.app.SafeQtInteractor.SafeQtInteractor : plotter
+troisDimensions.app.MaterielSimulation.MaterielSimulationApp *-- troisDimensions.app.Camera.Camera : camera
+troisDimensions.app.MaterielSimulation.MaterielSimulationApp *-- troisDimensions.Environnement.Sol.Sol : sol
+troisDimensions.app.MaterielSimulation.MaterielSimulationApp *-- troisDimensions.Environnement.Gravite.Gravite : gravite
+troisDimensions.app.MaterielSimulation.MaterielSimulationApp "1" o-- "0..*" troisDimensions.Formes.Forme.Forme : objects
+
 @enduml

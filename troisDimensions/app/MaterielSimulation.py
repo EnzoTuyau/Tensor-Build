@@ -75,7 +75,48 @@ class MaterielSimulationApp(QMainWindow):
                 border: 1px solid #2f4d72;
                 border-radius: 4px;
                 padding: 2px;
+                min-height: 24px;
             }
+
+            QDoubleSpinBox::up-button {
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 18px;
+                height: 12px;
+                background: #1a3a5c;
+                border: none;
+                border-left: 1px solid #2f4d72;
+                border-bottom: 1px solid #2f4d72;
+            }
+            QDoubleSpinBox::up-button:hover  { background: #0d8bff; }
+            QDoubleSpinBox::up-button:pressed { background: #0a6fd4; }
+
+            QDoubleSpinBox::down-button {
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 18px;
+                height: 12px;
+                background: #1a3a5c;
+                border: none;
+                border-left: 1px solid #2f4d72;
+                border-top: 1px solid #2f4d72;
+            }
+            QDoubleSpinBox::down-button:hover  { background: #0d8bff; }
+            QDoubleSpinBox::down-button:pressed { background: #0a6fd4; }
+
+            QDoubleSpinBox::up-arrow {
+                width: 0px; height: 0px;
+                border-left:  4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid #eaf2ff;
+            }
+            QDoubleSpinBox::down-arrow {
+                width: 0px; height: 0px;
+                border-left:  4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #eaf2ff;
+            }
+
             QPushButton {
                 background: #0d8bff;
                 color: #ffffff;
@@ -85,11 +126,7 @@ class MaterielSimulationApp(QMainWindow):
                 font-weight: bold;
             }
             QPushButton:hover { background: #2c9bff; }
-            QPushButton[variant="secondary"] {
-                background: #0d8bff;
-                color: #ffffff;
-                border: none;
-            }
+            QPushButton[variant="secondary"] { background: #0d8bff; color: #ffffff; border: none; }
             QPushButton[variant="secondary"]:hover { background: #2c9bff; }
             QPushButton[variant="danger"] { background: #9b2432; color: #ffffff; border: none; }
             QPushButton[variant="danger"]:hover { background: #b12b3a; }
@@ -104,6 +141,7 @@ class MaterielSimulationApp(QMainWindow):
         scene.objects = []
         scene._resize_drag_active = False
         scene._resize_drag_last_y = None
+        scene._mode_contraintes_actif = False
         scene.plotter.interactor.installEventFilter(scene)
         scene.plotter.interactor.installEventFilter(scene)
         scene.plotter.interactor.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # reçoit le focus clavier
@@ -412,6 +450,7 @@ class MaterielSimulationApp(QMainWindow):
             elif event.type() == QEvent.MouseButtonRelease and scene._resize_drag_active:
                 scene._resize_drag_active = False
                 scene._resize_drag_last_y = None
+                scene._mode_contraintes_actif = False 
                 return True
 
         return super().eventFilter(obj, event)
@@ -444,59 +483,24 @@ class MaterielSimulationApp(QMainWindow):
         rapport = scene.gravite.rapport_complet(scene.objects, mat_name)
         QMessageBox.information(scene, "Simulation", rapport)
 
-        # Anime la chute de toutes les formes avec une boucle à FPS stable.
+        # Reset à bleu avant chaque simulation si mode contraintes actif
+        if scene._mode_contraintes_actif:
+            for forme in scene.objects:
+                if forme.mesh is None:
+                    continue
+                scene.plotter.remove_actor(forme.actor)
+                forme.actor = scene.plotter.add_mesh(
+                    forme.mesh,
+                    scalars=np.zeros(forme.mesh.n_points),
+                    cmap="coolwarm",
+                    show_edges=False,
+                    reset_camera=False,
+                    clim=[0, 1]
+                )
+            scene.plotter.render()
+
         scene.animer_chute(scene.objects)
 
-    #---- Collision entre formes  ----#
-    def _detecter_collisions(scene, etats):
-        for i, etat_a in enumerate(etats):
-            for j, etat_b in enumerate(etats):
-                if i >= j:
-                    continue
-
-                forme_a = etat_a["forme"]
-                forme_b = etat_b["forme"]
-
-                cx_a, cy_a = forme_a.params["centre"][0], forme_a.params["centre"][1]
-                cx_b, cy_b = forme_b.params["centre"][0], forme_b.params["centre"][1]
-
-                # Rayon de collision vertical = rayon de la forme
-                demi_h_a = forme_a.r
-                demi_h_b = forme_b.r
-
-                # Rayon de collision horizontal = longueur/2 (car forme orientée sur X)
-                demi_w_a = forme_a.l / 2
-                demi_w_b = forme_b.l / 2
-
-                # Chevauchement horizontal (plan XY)
-                dist_horiz = ((cx_a - cx_b)**2 + (cy_a - cy_b)**2) ** 0.5
-                if dist_horiz >= demi_w_a + demi_w_b:
-                    continue
-
-                # Chevauchement vertical (axe Z)
-                bas_a  = etat_a["z"] - demi_h_a
-                haut_a = etat_a["z"] + demi_h_a
-                bas_b  = etat_b["z"] - demi_h_b
-                haut_b = etat_b["z"] + demi_h_b
-
-                if bas_a >= haut_b or bas_b >= haut_a:
-                    continue
-
-                # Collision — échange de vitesses
-                m_a = etat_a["masse"]
-                m_b = etat_b["masse"]
-                v_a = etat_a["vitesse_z"]
-                v_b = etat_b["vitesse_z"]
-
-                etat_a["vitesse_z"] = (v_a * (m_a - m_b) + 2 * m_b * v_b) / (m_a + m_b)
-                etat_b["vitesse_z"] = (v_b * (m_b - m_a) + 2 * m_a * v_a) / (m_a + m_b)
-
-                # Sépare les formes
-                overlap = min(haut_a, haut_b) - max(bas_a, bas_b)
-                etat_a["z"] += overlap / 2
-                etat_b["z"] -= overlap / 2
-
-        #------ Animation de la chute libre avec gestion du temps -----#
 
     def animer_chute(scene, formes):
         mat_name = scene.selecteur_materiaux.currentText()
@@ -518,12 +522,13 @@ class MaterielSimulationApp(QMainWindow):
                 "z_sol": -10.0 + forme.r,
                 "vitesse_z": 0.0,
                 "termine": False,
+                "energie_totale": 0.0,
+                "energie_sol": 0.0,        # onde qui part du bas
+                "energie_collision": 0.0,  # onde qui part du haut
             })
 
         impacts = []
         dernier_t = time.perf_counter()
-        frame_count = 0
-        CONTRAINTES_INTERVAL = 30  # calcul des contraintes tous les 30 frames
 
         while not all(etat["termine"] for etat in etats):
             frame_start = time.perf_counter()
@@ -532,7 +537,6 @@ class MaterielSimulationApp(QMainWindow):
                 dt = dt_cible
             dernier_t = frame_start
 
-            # Physique
             for etat in etats:
                 if etat["termine"]:
                     continue
@@ -543,8 +547,10 @@ class MaterielSimulationApp(QMainWindow):
                 if nouvelle_z <= etat["z_sol"]:
                     nouvelle_z = etat["z_sol"]
                     etat["termine"] = True
-                    etat["vitesse_z"] *= -0.3
                     energie = 0.5 * etat["masse"] * (etat["vitesse_z"] ** 2)
+                    etat["energie_sol"]    += energie  # onde du bas
+                    etat["energie_totale"] += energie
+                    etat["vitesse_z"] *= -0.3
                     impacts.append((forme.NOM, etat["masse"], energie))
 
                 dz = nouvelle_z - etat["z"]
@@ -557,39 +563,7 @@ class MaterielSimulationApp(QMainWindow):
                 if forme.mesh is not None:
                     forme.mesh.translate((0.0, 0.0, dz), inplace=True)
 
-            # Collisions forme-forme
             scene._detecter_collisions(etats)
-
-            frame_count += 1
-            if scene._mode_contraintes_actif and frame_count % CONTRAINTES_INTERVAL == 0:
-                
-                for etat in etats:
-                    forme = etat["forme"]
-                    mesh = forme.mesh
-                    if mesh is None:
-                        continue
-                    points = mesh.points
-                    masse = etat["masse"]
-                    poids = masse * g
-                    aire = 3.14159 * forme.r ** 2
-                    contrainte_max = poids / aire
-                    z_points = points[:, 2]
-                    z_min, z_max = z_points.min(), z_points.max()
-                    if z_max > z_min:
-                        z_norm = 1.0 - (z_points - z_min) / (z_max - z_min)
-                    else:
-                        z_norm = np.ones(len(z_points))
-                    facteur_impact = 1.0 + abs(etat["vitesse_z"]) * 0.1
-                    stress_values = (z_norm * contrainte_max * facteur_impact) / 1e6
-                    scene.plotter.remove_actor(forme.actor)
-                    forme.actor = scene.plotter.add_mesh(
-                        mesh,
-                        scalars=stress_values,
-                        cmap="coolwarm",
-                        show_edges=False,
-                        reset_camera=False,
-                        clim=[0, max(stress_values.max(), 0.001)]
-                    )
 
             scene.plotter.render()
             QApplication.processEvents()
@@ -598,6 +572,13 @@ class MaterielSimulationApp(QMainWindow):
             if reste > 0:
                 time.sleep(reste)
 
+        # 1. Heatmap pendant que les blocs sont AU SOL
+        if scene._mode_contraintes_actif:
+            scene._calculer_et_afficher_heatmap(etats)
+            scene.plotter.render()
+            QApplication.processEvents()
+
+        # 2. Popup impact
         if impacts:
             lignes = [
                 f"{nom} — {masse:.2f} kg | {energie:.2f} J"
@@ -605,44 +586,59 @@ class MaterielSimulationApp(QMainWindow):
             ]
             QMessageBox.information(scene, "Impact", "\n".join(lignes))
 
+        # 3. Remet les formes à leur position initiale
         for forme in formes:
             pos_init = positions_initiales[id(forme)]
             forme.params["centre"] = pos_init
             forme.mesh = None
             scene.dessiner_forme(forme)
 
-    #---- méthodes pour la vue de résistance -----#
-    
-    def afficher_resistance(scene):
-        scene._mode_contraintes_actif = True
-        if not scene.objects:
-            return
+        # 4. Réapplique le heatmap sur les mesh reconstruits
+        if scene._mode_contraintes_actif:
+            scene._calculer_et_afficher_heatmap(etats)
 
-        mat_name = scene.selecteur_materiaux.currentText()
+    def _calculer_et_afficher_heatmap(scene, etats):
+        """
+        Pour chaque forme, on accumule des sources d'ondes :
+        - Chaque source a une position z_source (bas=0.0, haut=1.0 dans l'espace normalisé)
+        et une intensité.
+        - L'onde part de z_source et décroît avec la distance (gaussienne).
+        - Toutes les ondes se superposent (interférence constructive).
+        
+        Exemple 3 blocs empilés :
+        sol → bas bloc1    (onde_bas   sur bloc1, intensité E_sol1)
+        bloc1→ haut bloc1  (onde_haut  sur bloc1, intensité E_col12)  [Newton: même force]
+        bloc1→ bas bloc2   (onde_bas   sur bloc2, intensité E_col12)
+        bloc2→ haut bloc2  (onde_haut  sur bloc2, intensité E_col23)
+        bloc2→ bas bloc3   (onde_bas   sur bloc3, intensité E_col23)
+        """
 
-        for forme in scene.objects:
+        # Énergie max globale pour normaliser toutes les intensités
+        energie_max = max(
+            (e["energie_sol"] + e["energie_collision"] for e in etats),
+            default=1.0
+        )
+        energie_max = max(energie_max, 0.001)
+
+        # Largeur de la gaussienne (fraction de la hauteur du bloc)
+        # 0.35 = onde qui couvre ~35% de la hauteur avant de s'atténuer
+        SIGMA = 0.35
+
+        for etat in etats:
+            forme = etat["forme"]
             mesh = forme.mesh
-            points = mesh.points  # tableau numpy (N, 3) des points du mesh
+            if mesh is None:
+                continue
 
-            # --- Calcul physique ---
-            masse = scene.gravite.calculer_masse(forme, mat_name)
-            poids = masse * scene.gravite.g          # F = mg (N)
-            aire = 3.14159 * forme.r ** 2            # section transversale (m²)
-            contrainte_max = poids / aire            # σ = F/A (Pa)
-
-            # --- Distribution réaliste selon Z ---
-            # Plus bas dans l'objet = plus de contrainte (supporte le poids du dessus)
+            points = mesh.points
             z_points = points[:, 2]
-            z_min = z_points.min()
-            z_max = z_points.max()
+            z_min, z_max = z_points.min(), z_points.max()
+            hauteur = max(z_max - z_min, 1e-6)
 
-            if z_max > z_min:
-                # Normalise Z : bas = 1.0 (max contrainte), haut = 0.0 (min contrainte)
-                z_norm = 1.0 - (z_points - z_min) / (z_max - z_min)
-            else:
-                z_norm = np.ones(len(z_points))
+            # z normalisé [0, 1] : 0 = bas du bloc, 1 = haut du bloc
+            z_norm = (z_points - z_min) / hauteur
 
-            # Ajoute variation radiale : centre sous plus de compression que les bords
+            # Distribution radiale : centre = plus comprimé
             centre_x = points[:, 0].mean()
             centre_y = points[:, 1].mean()
             dist_radiale = np.sqrt(
@@ -650,25 +646,143 @@ class MaterielSimulationApp(QMainWindow):
                 (points[:, 1] - centre_y) ** 2
             )
             r_max = dist_radiale.max() if dist_radiale.max() > 0 else 1.0
-            r_norm = 1.0 - (dist_radiale / r_max) * 0.3  # centre +30% de contrainte
+            r_norm = 1.0 - (dist_radiale / r_max) * 0.3  # [0.7, 1.0]
 
-            # Contrainte finale en MPa
-            stress_values = (z_norm * r_norm * contrainte_max) / 1e6
+            # ── Sources d'ondes pour ce bloc ──────────────────────────────
+            # Chaque source = (z_source_normalisée, intensité)
+            # z_source = 0.0 → onde part du bas
+            # z_source = 1.0 → onde part du haut
+            sources = []
+
+            energie_sol       = etat.get("energie_sol", 0.0)
+            energie_collision = etat.get("energie_collision", 0.0)
+
+            if energie_sol > 0:
+                # Impact venant du bas (sol ou rebond sur bloc inférieur)
+                sources.append((0.0, energie_sol / energie_max))
+
+            if energie_collision > 0:
+                # Impact venant du haut (bloc supérieur qui tombe)
+                sources.append((1.0, energie_collision / energie_max))
+
+            if not sources:
+                # Aucun impact → tout bleu
+                stress_values = np.zeros(len(z_points))
+            else:
+                # Superposition gaussienne de toutes les ondes
+                stress_values = np.zeros(len(z_points))
+                for z_src, intensite in sources:
+                    # Gaussienne centrée sur z_src
+                    onde = intensite * np.exp(-((z_norm - z_src) ** 2) / (2 * SIGMA ** 2))
+                    stress_values += onde
+
+                # Applique la distribution radiale
+                stress_values *= r_norm
+
+                # Normalise pour que le max global reste cohérent entre les blocs
+                intensite_totale = sum(i for _, i in sources)
+                s_max = stress_values.max()
+                if s_max > 0:
+                    stress_values = stress_values / s_max * min(intensite_totale, 1.0)
 
             scene.plotter.remove_actor(forme.actor)
             forme.actor = scene.plotter.add_mesh(
                 mesh,
                 scalars=stress_values,
-                cmap="coolwarm",       # bleu = faible, rouge = élevé
+                cmap="coolwarm",
                 show_edges=False,
                 reset_camera=False,
-                clim=[0, stress_values.max() if stress_values.max() > 0 else 1]
+                clim=[0, 1]
+            )
+
+        scene.plotter.render()
+
+    #---- Collision entre formes  ----#
+    def _detecter_collisions(scene, etats):
+        for i, etat_a in enumerate(etats):
+            for j, etat_b in enumerate(etats):
+                if i >= j:
+                    continue
+
+                forme_a = etat_a["forme"]
+                forme_b = etat_b["forme"]
+
+                cx_a, cy_a = forme_a.params["centre"][0], forme_a.params["centre"][1]
+                cx_b, cy_b = forme_b.params["centre"][0], forme_b.params["centre"][1]
+
+                demi_h_a = forme_a.r
+                demi_h_b = forme_b.r
+                demi_w_a = forme_a.l / 2
+                demi_w_b = forme_b.l / 2
+
+                dist_horiz = ((cx_a - cx_b)**2 + (cy_a - cy_b)**2) ** 0.5
+                if dist_horiz >= demi_w_a + demi_w_b:
+                    continue
+
+                bas_a  = etat_a["z"] - demi_h_a
+                haut_a = etat_a["z"] + demi_h_a
+                bas_b  = etat_b["z"] - demi_h_b
+                haut_b = etat_b["z"] + demi_h_b
+
+                if bas_a >= haut_b or bas_b >= haut_a:
+                    continue
+
+                m_a = etat_a["masse"]
+                m_b = etat_b["masse"]
+                v_a = etat_a["vitesse_z"]
+                v_b = etat_b["vitesse_z"]
+
+                # Énergie cinétique relative à l'impact
+                v_rel = abs(v_a - v_b)
+                masse_reduite = (m_a * m_b) / (m_a + m_b)
+                energie_collision = 0.5 * masse_reduite * v_rel ** 2
+
+                # Forme du dessous → reçoit onde par le haut (poids qui tombe dessus)
+                # Forme du dessus  → reçoit onde par le bas (rebond sur l'autre)
+                if etat_a["z"] < etat_b["z"]:
+                    etat_a["energie_collision"] += energie_collision
+                    etat_b["energie_sol"]       += energie_collision
+                else:
+                    etat_b["energie_collision"] += energie_collision
+                    etat_a["energie_sol"]       += energie_collision
+
+                etat_a["energie_totale"] += energie_collision
+                etat_b["energie_totale"] += energie_collision
+
+                # Échange de vitesses
+                etat_a["vitesse_z"] = (v_a * (m_a - m_b) + 2 * m_b * v_b) / (m_a + m_b)
+                etat_b["vitesse_z"] = (v_b * (m_b - m_a) + 2 * m_a * v_a) / (m_a + m_b)
+
+                # Sépare les formes
+                overlap = min(haut_a, haut_b) - max(bas_a, bas_b)
+                etat_a["z"] += overlap / 2
+                etat_b["z"] -= overlap / 2
+
+
+    def afficher_resistance(scene):
+        scene._mode_contraintes_actif = True
+        if not scene.objects:
+            return
+
+        for forme in scene.objects:
+            if forme.mesh is None:
+                continue
+            stress_values = np.zeros(forme.mesh.n_points)
+            scene.plotter.remove_actor(forme.actor)
+            forme.actor = scene.plotter.add_mesh(
+                forme.mesh,
+                scalars=stress_values,
+                cmap="coolwarm",
+                show_edges=False,
+                reset_camera=False,
+                clim=[0, 1]
             )
 
         scene.plotter.add_scalar_bar(
-            title="Contrainte de compression (MPa)",
+            title="Contrainte (MPa)",
             color="white"
         )
+        scene.plotter.render()
 
     # ------------------------------------------------------------------ #
     #  Mode Effacer                                                        #
