@@ -30,7 +30,6 @@ from deuxDimensions.physics.calculs import (
     _hauteur_appui_max,
     _resoudre_collision,
     _statistiques_globales_section,
-    _statut_utilisation,
     calculer_donnees_physiques,
 )
 from deuxDimensions.rendering.canvas2d import Canvas2D
@@ -57,7 +56,6 @@ __all__ = [
     "_hauteur_appui_max",
     "_resoudre_collision",
     "_statistiques_globales_section",
-    "_statut_utilisation",
     "calculer_donnees_physiques",
     "lancer_application",
 ]

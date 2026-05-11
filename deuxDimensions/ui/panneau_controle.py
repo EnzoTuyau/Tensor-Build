@@ -618,14 +618,9 @@ class PanneauControle(QFrame):
         self.spin_pression.setRange(0, 1e6)
         self.spin_pression.setSuffix(" Pa")
         self.spin_pression.setSingleStep(500)
-        self.spin_moment = QDoubleSpinBox()
-        self.spin_moment.setRange(-1e6, 1e6)
-        self.spin_moment.setSuffix(" N·m")
-        self.spin_moment.setSingleStep(100)
         self.spin_force.valueChanged.connect(self._appliquer_charges)
         self.spin_force_x.valueChanged.connect(self._appliquer_charges)
         self.spin_pression.valueChanged.connect(self._appliquer_charges)
-        self.spin_moment.valueChanged.connect(self._appliquer_charges)
 
         self.btn_placer_fz = self._bouton_placement("F_z")
         self.btn_placer_fx = self._bouton_placement("F_x")
@@ -643,7 +638,6 @@ class PanneauControle(QFrame):
             self._champ_avec_placement(self.spin_force_x, self.btn_placer_fx),
         )
         form.addRow(self._field_label("Pression"), self.spin_pression)
-        form.addRow(self._field_label("Moment"), self.spin_moment)
         self._charges_form = form
         lay.addLayout(form)
 
@@ -731,7 +725,7 @@ class PanneauControle(QFrame):
 
     def _set_charges_enabled(self, enabled: bool):
         for w in (
-            self.spin_force, self.spin_force_x, self.spin_pression, self.spin_moment
+            self.spin_force, self.spin_force_x, self.spin_pression
         ):
             w.setEnabled(enabled)
         for b in (self.btn_placer_fz, self.btn_placer_fx):
@@ -773,13 +767,12 @@ class PanneauControle(QFrame):
             self.canvas.activer_mode_placement(None)
         if 0 <= ligne < len(self.canvas.blocs):
             bloc = self.canvas.blocs[ligne]
-            spins = (self.spin_force, self.spin_force_x, self.spin_pression, self.spin_moment)
+            spins = (self.spin_force, self.spin_force_x, self.spin_pression)
             for spin in spins:
                 spin.blockSignals(True)
             self.spin_force.setValue(bloc["ext_force"])
             self.spin_force_x.setValue(bloc.get("ext_force_x", 0.0))
             self.spin_pression.setValue(bloc["pressure"])
-            self.spin_moment.setValue(bloc["moment"])
             for spin in spins:
                 spin.blockSignals(False)
             self._set_charges_enabled(True)
@@ -806,7 +799,6 @@ class PanneauControle(QFrame):
             bloc["ext_force"] = self.spin_force.value()
             bloc["ext_force_x"] = self.spin_force_x.value()
             bloc["pressure"] = self.spin_pression.value()
-            bloc["moment"] = self.spin_moment.value()
             self.callback_physique(refresh_list=False)
 
     def rafraichir_liste(self):

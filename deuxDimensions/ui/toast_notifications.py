@@ -77,7 +77,6 @@ class Toast(QFrame):
         super().__init__(None)
         self.setObjectName("toast")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setWindowFlags(
             Qt.WindowType.Tool
@@ -95,20 +94,22 @@ class Toast(QFrame):
         self.setStyleSheet(
             f"""
             QFrame#toast {{
-                background: #1a0d10;
-                border: 2px solid {accent};
-                border-left: 6px solid {accent};
+                background-color: #120a0c;
+                border: none;
                 border-radius: 12px;
             }}
             QLabel[role="t-title"] {{
-                color: #ffffff; font-size: 14px; font-weight: 800;
+                color: #f8fafc; font-size: 14px; font-weight: 800;
                 letter-spacing: 0.3px;
+                background-color: transparent;
             }}
             QLabel[role="t-sub"] {{
-                color: #ffd8d8; font-size: 11px;
+                color: #fecaca; font-size: 11px;
+                background-color: transparent;
             }}
             QLabel[role="t-icon"] {{
                 color: {accent}; font-size: 22px; font-weight: 800;
+                background-color: transparent;
             }}
             QPushButton[role="t-close"] {{
                 background: transparent; color: #ffd8d8; border: none;
@@ -118,6 +119,9 @@ class Toast(QFrame):
             QPushButton[role="t-close"]:hover {{
                 background: #3a1f25; color: #ffffff;
             }}
+            QWidget#toastInner {{
+                background-color: #120a0c;
+            }}
             """
         )
 
@@ -126,6 +130,8 @@ class Toast(QFrame):
         outer.setSpacing(0)
 
         body = QWidget()
+        body.setObjectName("toastInner")
+        body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         h = QHBoxLayout(body)
         h.setContentsMargins(12, 10, 8, 10)
         h.setSpacing(10)
@@ -317,7 +323,6 @@ class _OverflowChip(QFrame):
     def __init__(self, parent=None):
         super().__init__(None)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setWindowFlags(
             Qt.WindowType.Tool
@@ -326,7 +331,7 @@ class _OverflowChip(QFrame):
             | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setStyleSheet(
-            "background:#06080c; color:#9eb4d9; border:1px solid #3b4b62;"
+            "background-color:#06080c; color:#9eb4d9; border:1px solid #3b4b62;"
             "border-radius:10px; padding:4px 10px;"
             "font-size:11px; font-weight:700; letter-spacing:0.6px;"
         )

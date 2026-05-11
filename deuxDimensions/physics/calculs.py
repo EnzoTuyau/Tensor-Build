@@ -13,7 +13,7 @@ from deuxDimensions.domain.constantes import (
     STRESS_VISUAL_MAX_COMPRESSION,
     STRESS_VISUAL_MAX_EXTENSION,
 )
-from deuxDimensions.domain.geometry import sommets_rectangle_ax
+from deuxDimensions.domain.geometry import largeur_bloc, sommets_rectangle_ax
 
 
 def _tau_limite(mat: dict[str, Any]) -> float:
@@ -56,14 +56,6 @@ def _charge_verticale_au_bas_de_la_pile(
     return memo[idx]
 
 
-def _statut_utilisation(util_pct: float) -> tuple[str, str]:
-    """Libelle et pictogramme selon le % d'utilisation par rapport a sigma_y."""
-    if util_pct < 80:
-        return "OK", "✓"
-    if util_pct < 100:
-        return "⚠️ Attention", "!"
-    return "❌ RUPTURE", "✗"
-
 
 def _fmt_force(val: float) -> str:
     """Formatte une force (N) en kN si > 1000, sinon N, avec 1 décimale max."""
@@ -85,15 +77,12 @@ def _bloc_carte_detail(
     f_ext: float,
     f_pression: float,
     f_ext_x: float,
-    moment: float,
     sigma_axial: float,
-    sig_haut: float,
-    sig_bas: float,
     sigma_max_normal: float,
     tau_xy_max: float,
     sigma_y: float,
     tau_lim: float,
-    util_axial_flex: float,
+    util_axial: float,
     util_shear: float,
 ) -> str:
     """Carte HTML compacte par bloc (lisible dans un QTextEdit dark)."""
@@ -114,7 +103,6 @@ def _bloc_carte_detail(
         + _ligne("Force ext. F<sub>z</sub>", _fmt_force(f_ext), f_ext)
         + _ligne("Pression",       _fmt_force(f_pression), f_pression)
         + _ligne("Force ext. F<sub>x</sub>", _fmt_force(f_ext_x), f_ext_x)
-        + _ligne("Moment",         f"{moment:.0f} N·m", moment)
         + f"<tr><td colspan='2' style='border-top:1px solid #25304a;padding-top:4px;'>"
           f"<span style='color:#9eb4d9'>Total axial</span> "
           f"<span style='float:right;color:#f3f7ff;'><b>{_fmt_force(f_axial)}</b></span>"
@@ -124,9 +112,6 @@ def _bloc_carte_detail(
     # Contraintes
     contraintes_rows = (
         _ligne("σ axiale",   f"{sigma_axial/1e6:.2f} MPa")
-        + _ligne("σ flex (haut/bas)",
-                 f"{sig_haut/1e6:+.2f} / {sig_bas/1e6:+.2f} MPa",
-                 abs(sig_haut) + abs(sig_bas))
         + _ligne("σ max |normal|", f"<b style='color:#f3f7ff'>{sigma_max_normal/1e6:.2f} MPa</b>")
         + _ligne("τ max", f"{tau_xy_max/1e6:.3f} MPa", tau_xy_max)
         + _ligne("σ<sub>y</sub> · τ<sub>lim</sub>",
@@ -148,7 +133,7 @@ def _bloc_carte_detail(
 
     pills = (
         f"<div style='padding:4px 0 0 0;'>"
-        f"{_pill('Axial+flex', util_axial_flex)}"
+        f"{_pill('Axial', util_axial)}"
         f"<span style='color:#3b4b62;'> · </span>"
         f"{_pill('Cisaillement', util_shear)}"
         f"</div>"
@@ -157,11 +142,17 @@ def _bloc_carte_detail(
     return (
         f"<table width='100%' cellspacing='0' cellpadding='0' "
         f"style='margin:8px 0;border-left:3px solid {edge_color};'>"
-        f"<tr><td colspan='2' style='padding:6px 0 4px 10px;'>"
+        f"<tr>"
+        f"<td style='padding:6px 0 4px 10px;'>"
         f"<b style='color:#f3f7ff;font-size:12px;'>Bloc {numero}</b>"
         f"<span style='color:#9eb4d9;'> · {materiau}</span>"
-        f"<span style='float:right;color:{etat_couleur};font-weight:700;'>{etat_libelle}</span>"
-        f"</td></tr>"
+        f"</td>"
+        f"<td align='right' nowrap "
+        f"style='padding:6px 10px 4px 20px;color:{etat_couleur};font-weight:700;"
+        f"vertical-align:baseline;'>"
+        f"{etat_libelle}"
+        f"</td>"
+        f"</tr>"
         f"<tr><td colspan='2' style='padding:4px 0 2px 10px;'>"
         f"<span style='color:#6c7c95;font-size:10px;letter-spacing:1px;'>CHARGES</span>"
         f"</td></tr>"
@@ -211,21 +202,12 @@ def _contraintes_et_detail_bloc(
     tau_xy_moy = f_ext_x / section_axiale if section_axiale > 0 else 0.0
     tau_xy_max = 1.5 * tau_xy_moy
 
-    moment = bloc["moment"]
-    i_local = (w * h**3) / 12
-    sig_haut = moment * (h / 2) / i_local if i_local > 0 else 0.0
-    sig_bas = moment * (-h / 2) / i_local if i_local > 0 else 0.0
-
-    sigma_normal_top = sigma_axial + sig_haut
-    sigma_normal_bot = sigma_axial + sig_bas
-    sigma_max_normal = max(abs(sigma_normal_top), abs(sigma_normal_bot))
+    sigma_max_normal = abs(sigma_axial)
 
     sigma_y = mat["sigma_y"]
     tau_lim = _tau_limite(mat)
-    util_axial_flex = sigma_max_normal / sigma_y * 100 if sigma_y > 0 else 0.0
+    util_axial = sigma_max_normal / sigma_y * 100 if sigma_y > 0 else 0.0
     util_shear = abs(tau_xy_max) / tau_lim * 100 if tau_lim > 0 else 0.0
-
-    statut, sym = _statut_utilisation(util_axial_flex)
 
     E = mat["E"]
     nu = 0.3
@@ -235,7 +217,7 @@ def _contraintes_et_detail_bloc(
     delta_h = (f_axial * h) / (E * section_axiale) if section_axiale > 0 and E > 0 else 0.0
     delta_x = (f_ext_x * h) / (G * section_axiale) if section_axiale > 0 and G > 0 else 0.0
 
-    util_max = max(util_axial_flex, util_shear)
+    util_max = max(util_axial, util_shear)
     if util_max < 80:
         couleur_util, libelle_etat = "#5ee1a1", "OK"
     elif util_max < 100:
@@ -268,15 +250,12 @@ def _contraintes_et_detail_bloc(
             f_ext=f_ext,
             f_pression=f_pression,
             f_ext_x=f_ext_x,
-            moment=moment,
             sigma_axial=sigma_axial,
-            sig_haut=sig_haut,
-            sig_bas=sig_bas,
             sigma_max_normal=sigma_max_normal,
             tau_xy_max=tau_xy_max,
             sigma_y=sigma_y,
             tau_lim=tau_lim,
-            util_axial_flex=util_axial_flex,
+            util_axial=util_axial,
             util_shear=util_shear,
         )
     ]
@@ -284,20 +263,16 @@ def _contraintes_et_detail_bloc(
     stress = {
         "sigma_total": sigma_max_normal,
         "sigma_axial": sigma_axial,
-        "sigma_bending_top": sig_haut,
-        "sigma_bending_bot": sig_bas,
-        "sigma_normal_top": sigma_normal_top,
-        "sigma_normal_bot": sigma_normal_bot,
         "sigma_max_normal": sigma_max_normal,
         "tau_xy_moy": tau_xy_moy,
         "tau_xy_max": tau_xy_max,
         "tau_lim": tau_lim,
-        "util_axial_flex": util_axial_flex,
+        "util_axial": util_axial,
         "util_shear": util_shear,
         "ext_force": f_ext + f_pression,
         "ext_force_x": f_ext_x,
         "pressure": bloc["pressure"],
-        "utilization": util_axial_flex,
+        "utilization": util_axial,
         "F_axial": f_axial,
         "delta_h": delta_h,
         "delta_x": delta_x,
@@ -415,7 +390,7 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
     """
     bloc_m = blocs[idx_mobile]
     mx, my = bloc_m["x"], bloc_m["y"]
-    largeur, hauteur = bloc_m["largeur"], bloc_m["h0"]
+    largeur, hauteur = largeur_bloc(bloc_m), bloc_m["h0"]
     collision = False
 
     for i, autre_bloc in enumerate(blocs):
@@ -438,14 +413,12 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
 
             if min_penet == penet_haut:
                 my = oy + oh
-                my = oy + oh
             elif min_penet == penet_bas:
-             my = oy - hauteur
+                my = oy - hauteur
             elif min_penet == penet_droite:
                 mx = ox + ow
-                mx = ox + ow
             else:
-                 mx = ox - largeur
+                mx = ox - largeur
 
     bloc_m["x"] = mx
     bloc_m["y"] = my

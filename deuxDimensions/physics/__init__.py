@@ -7,7 +7,6 @@ from .calculs import (
     _hauteur_appui_max,
     _resoudre_collision,
     _statistiques_globales_section,
-    _statut_utilisation,
     calculer_donnees_physiques,
 )
 
@@ -18,6 +17,5 @@ __all__ = [
     "_hauteur_appui_max",
     "_resoudre_collision",
     "_statistiques_globales_section",
-    "_statut_utilisation",
     "calculer_donnees_physiques",
 ]

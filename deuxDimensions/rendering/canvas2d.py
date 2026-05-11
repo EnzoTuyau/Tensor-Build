@@ -40,7 +40,7 @@ from deuxDimensions.domain.constantes import (
 )
 from deuxDimensions.domain import bloc_etat as etat_bloc
 from deuxDimensions.domain.failure import evaluer_latch_rupture
-from deuxDimensions.domain.geometry import sommets_quad_depuis_xy_patch, sommets_rectangle_ax
+from deuxDimensions.domain.geometry import largeur_bloc, sommets_quad_depuis_xy_patch, sommets_rectangle_ax
 from deuxDimensions.domain.pressure_field import scalar_field_for_heatmap
 from deuxDimensions.physics.calculs import _geom_patch, _hauteur_appui_max, _resoudre_collision
 from deuxDimensions.rendering.canvas_visuel import (
@@ -56,7 +56,6 @@ from deuxDimensions.ui.bloc_tooltip import texte_infobulle_bloc
 from deuxDimensions.ui.charge_tooltip import (
     texte_infobulle_force_horizontale,
     texte_infobulle_force_verticale,
-    texte_infobulle_moment,
     texte_infobulle_pression,
 )
 
@@ -255,7 +254,7 @@ class Canvas2D(FigureCanvasQTAgg):
         return best
 
     def _mettre_a_jour_tooltip_survol_bloc(self, event):
-        """Infobulle : charges (flèches / moment) puis bloc sous le curseur."""
+        """Infobulle : charges (flèches) puis bloc sous le curseur."""
         if self._idx_drag is not None:
             return
         if event.inaxes != self.axes:
@@ -380,7 +379,7 @@ class Canvas2D(FigureCanvasQTAgg):
             return
         mode = self._mode_placement_charge
         bloc = self.blocs[idx]
-        w = max(1e-6, float(bloc["largeur"]))
+        w = max(1e-6, largeur_bloc(bloc))
         h = max(1e-6, float(bloc["h0"]))
         x_norm = (float(xdata) - float(bloc["x"])) / w
         y_norm = (float(ydata) - float(bloc["y"])) / h
@@ -597,7 +596,6 @@ class Canvas2D(FigureCanvasQTAgg):
                 "ext_force_x_offset": 0.5,
                 "ext_force_x_y_offset": 0.5,
                 "ext_force_x_side": "left",
-                "moment": 0.0,
                 "pressure": 0.0,
                 etat_bloc.CLE_MATRICE_THERMIQUE: None,
                 etat_bloc.CLE_MAILLAGE_THERMIQUE: None,
@@ -794,7 +792,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
             if i in self._file_rupture:
                 continue
-            util = float(stress.get("utilization", stress.get("util_axial_flex", 0.0)))
+            util = float(stress.get("utilization", stress.get("util_axial", 0.0)))
             armed = bool(bloc.get(etat_bloc.CLE_ARMEMENT_RUPTURE, True))
             declenche, nouvel_armed = evaluer_latch_rupture(util, armed)
             bloc[etat_bloc.CLE_ARMEMENT_RUPTURE] = nouvel_armed
@@ -835,7 +833,7 @@ class Canvas2D(FigureCanvasQTAgg):
             "util_pct": util_pct,
             "x": bloc["x"],
             "y": bloc["y"],
-            "w": bloc["largeur"],
+            "w": largeur_bloc(bloc),
             "h": bloc["h0"],
         }
 
@@ -1030,14 +1028,14 @@ class Canvas2D(FigureCanvasQTAgg):
                 if bloc.get(etat_bloc.CLE_RUPTURE_EN_COURS):
                     continue
                 h0 = bloc["h0"]
-                w = bloc["largeur"]
+                w = largeur_bloc(bloc)
                 x, y = bloc["x"], bloc["y"]
                 dh = stress.get("delta_h", 0.0)
                 v_dh = dh * v_scale
                 h_animee = max(0.01, h0 - v_dh)
                 nx = max(2, min(HEATMAP_CELLES_MAX, int(w * 10)))
                 ny = max(2, min(HEATMAP_CELLES_MAX, int(h_animee * 10)))
-                pa_pre = scalar_field_for_heatmap(bloc, stress, y_coin_bas=y, h=h_animee, nx=nx, ny=ny)
+                pa_pre = scalar_field_for_heatmap(bloc, stress, h=h_animee, nx=nx, ny=ny)
                 vmax_hm = max(vmax_hm, float(np.max(pa_pre)))
             vmax_hm = max(vmax_hm, 1.0)
             norm_hm = mcolors.Normalize(vmin=0.0, vmax=vmax_hm)
@@ -1084,7 +1082,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 bloc["patch"].set_xy(nouveaux_points)
             h = h_animee if not breaking else h0
 
-            util = float(stress.get("utilization", stress.get("util_axial_flex", 0.0)))
+            util = float(stress.get("utilization", stress.get("util_axial", 0.0)))
             bloc[etat_bloc.CLE_DERNIER_UTIL_DESSIN] = util
             mp_mat = MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])
             ec = bloc.get("edgecolor") or mp_mat["edge"]
@@ -1098,7 +1096,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 if self.carte_chaleur and norm_hm is not None:
                     nx = max(2, min(HEATMAP_CELLES_MAX, int(w * 10)))
                     ny = max(2, min(HEATMAP_CELLES_MAX, int(h * 10)))
-                    pa = scalar_field_for_heatmap(bloc, stress, y_coin_bas=y, h=h, nx=nx, ny=ny)
+                    pa = scalar_field_for_heatmap(bloc, stress, h=h, nx=nx, ny=ny)
                     bloc[etat_bloc.CLE_MATRICE_THERMIQUE] = pa
                     bloc[etat_bloc.CLE_MAILLAGE_THERMIQUE] = (nx, ny)
                     xs = [p[0] for p in nouveaux_points]
@@ -1120,36 +1118,18 @@ class Canvas2D(FigureCanvasQTAgg):
                     im.set_alpha(0.93)
                     self._images_chaleur.append(im)
                     heatmap_any = True
-                elif abs(stress.get("sigma_bending_top", 0)) > 1:
-                    for decalage, sigma in [
-                        (0, stress["sigma_bending_bot"]),
-                        (h / 2, stress["sigma_bending_top"]),
-                    ]:
-                        couleur = colormap(normaliseur(abs(sigma)))
-                        rect = Rectangle(
-                            (x, y + decalage),
-                            w,
-                            h / 2,
-                            facecolor=couleur,
-                            edgecolor="none",
-                            alpha=0.55,
-                            zorder=6,
-                        )
-                        self.axes.add_patch(rect)
-                        self._patches_stress.append(rect)
                 else:
                     couleur = colormap(normaliseur(abs(stress["sigma_total"])))
-                    rect = Rectangle(
-                        (x, y),
-                        w,
-                        h,
+                    poly = Polygon(
+                        nouveaux_points,
+                        closed=True,
                         facecolor=couleur,
                         edgecolor="none",
                         alpha=0.55,
                         zorder=6,
                     )
-                    self.axes.add_patch(rect)
-                    self._patches_stress.append(rect)
+                    self.axes.add_patch(poly)
+                    self._patches_stress.append(poly)
 
             selectionne = self._index_bloc_souligne is not None and i == self._index_bloc_souligne
             if breaking:
@@ -1162,16 +1142,27 @@ class Canvas2D(FigureCanvasQTAgg):
                 ec_rect = teinte_contour_contrainte(ec, util)
                 lw_rect = _EP_RECT_CONTOUR_NORMAL
 
-            contour = Rectangle(
-                (x, y),
-                w,
-                h,
-                facecolor="none",
-                edgecolor=ec_rect,
-                linewidth=lw_rect,
-                linestyle="--" if breaking else "solid",
-                zorder=7,
-            )
+            if breaking:
+                contour = Rectangle(
+                    (x, y),
+                    w,
+                    h,
+                    facecolor="none",
+                    edgecolor=ec_rect,
+                    linewidth=lw_rect,
+                    linestyle="--",
+                    zorder=7,
+                )
+            else:
+                contour = Polygon(
+                    nouveaux_points,
+                    closed=True,
+                    facecolor="none",
+                    edgecolor=ec_rect,
+                    linewidth=lw_rect,
+                    linestyle="solid",
+                    zorder=7,
+                )
             self.axes.add_patch(contour)
             self._patches_stress.append(contour)
 
@@ -1190,8 +1181,9 @@ class Canvas2D(FigureCanvasQTAgg):
                 self._patches_stress.append(sol_sh)
 
             if not breaking and abs(bloc.get("ext_force", 0.0)) > 1e-6:
-                cx = x + w * float(bloc.get("ext_force_x_offset", 0.5))
-                y_top = y + h
+                u_fz = float(bloc.get("ext_force_x_offset", 0.5))
+                cx = x + w * u_fz + v_dx_final
+                y_top = y + h_animee
                 tail_y = y_top + max(0.28, min(0.75, h * 0.32))
                 fleche = FancyArrowPatch(
                     (cx, tail_y),
@@ -1226,9 +1218,10 @@ class Canvas2D(FigureCanvasQTAgg):
 
             if not breaking and abs(bloc.get("pressure", 0.0)) > 1e-6:
                 nb_fleches = max(3, int(w * 2))
-                y_top = y + h
+                y_top = y + h_animee
                 for k in range(nb_fleches):
-                    xf = x + (k + 0.5) * w / nb_fleches
+                    u = (k + 0.5) / nb_fleches
+                    xf = x + u * w + v_dx_final
                     yt = y_top + max(0.18, min(0.42, h * 0.22))
                     f = FancyArrowPatch(
                         (xf, yt),
@@ -1264,18 +1257,20 @@ class Canvas2D(FigureCanvasQTAgg):
             if not breaking:
                 fx_b = float(bloc.get("ext_force_x", 0.0))
                 if abs(fx_b) > 1e-6:
-                    cy = y + h * float(bloc.get("ext_force_x_y_offset", 0.5))
+                    v_off = float(bloc.get("ext_force_x_y_offset", 0.5))
                     side = str(bloc.get("ext_force_x_side", "left"))
                     overhang = max(0.35, min(0.9, w * 0.35))
-                    # La direction de la flèche dépend de side: depuis l'extérieur
-                    # de la face cliquée vers l'intérieur du bloc.
                     if side == "left":
-                        x_tip, x_tail = x, x - overhang
+                        x_tip = x + v_off * v_dx_final
+                        y_at = y + v_off * h_animee
+                        x_tail = x_tip - overhang
                     else:
-                        x_tip, x_tail = x + w, x + w + overhang
+                        x_tip = x + w + v_off * v_dx_final
+                        y_at = y + v_off * h_animee
+                        x_tail = x_tip + overhang
                     fh = FancyArrowPatch(
-                        (x_tail, cy),
-                        (x_tip, cy),
+                        (x_tail, y_at),
+                        (x_tip, y_at),
                         arrowstyle="-|>",
                         mutation_scale=14,
                         color="#6a1b9a",
@@ -1286,7 +1281,7 @@ class Canvas2D(FigureCanvasQTAgg):
                     self._artistes_fleches.append(fh)
                     mr = max(0.02, min(w, h) * 0.03)
                     pt_x = Circle(
-                        (x_tip, cy),
+                        (x_tip, y_at),
                         radius=mr,
                         facecolor="#ede7f6",
                         edgecolor="#4a148c",
@@ -1297,38 +1292,12 @@ class Canvas2D(FigureCanvasQTAgg):
                     self._patches_stress.append(pt_x)
                     self._zones_charge_tooltip.append(
                         {
-                            "p0": (x_tail, cy),
-                            "p1": (x_tip, cy),
+                            "p0": (x_tail, y_at),
+                            "p1": (x_tip, y_at),
                             "text": texte_infobulle_force_horizontale(i, bloc, stress),
                             "ctx": ("Fx", i),
                         }
                     )
-
-            if not breaking and abs(bloc.get("moment", 0.0)) > 1e-6:
-                cx_m = x + w / 2
-                cy_m = y + h / 2
-                mom = float(bloc["moment"])
-                arc_r = -0.5 if mom > 0 else 0.5
-                arc_patch = FancyArrowPatch(
-                    (cx_m + 0.26 * w, cy_m - 0.02 * h),
-                    (cx_m - 0.26 * w, cy_m - 0.02 * h),
-                    connectionstyle=f"arc3,rad={arc_r}",
-                    arrowstyle="-|>",
-                    mutation_scale=13,
-                    color="#f9a825",
-                    linewidth=2.3,
-                    zorder=11,
-                )
-                self.axes.add_patch(arc_patch)
-                self._artistes_fleches.append(arc_patch)
-                r_disk = max(0.12, min(w, h) * 0.28)
-                self._zones_charge_tooltip.append(
-                    {
-                        "disk": (cx_m, cy_m, r_disk),
-                        "text": texte_infobulle_moment(i, bloc),
-                        "ctx": ("M", i),
-                    }
-                )
 
         def _y_interface(pa):
             i_bot, _, _ = pa

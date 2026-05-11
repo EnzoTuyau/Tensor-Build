@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
+
+
+def largeur_bloc(bloc: dict[str, Any]) -> float:
+    """Largeur (m) : clé canonique ``w``, alias historique ``largeur``."""
+    if "largeur" in bloc:
+        return float(bloc["largeur"])
+    return float(bloc.get("w", 0.0))
 
 
 def sommets_rectangle_ax(x: float, y: float, largeur: float, hauteur: float):

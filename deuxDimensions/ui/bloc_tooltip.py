@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
+from deuxDimensions.domain.geometry import largeur_bloc
+
 
 def texte_infobulle_bloc(index: int, bloc: dict[str, Any], stress: dict[str, Any] | None) -> str:
     """Résumé compact : géométrie, charges appliquées, contraintes si disponibles."""
+    w = largeur_bloc(bloc)
     lig = [
         f"Bloc {index + 1} — {bloc['material']}",
-        f"{bloc['largeur']:.2f} × {bloc['h0']:.2f} m",
+        f"{w:.2f} × {bloc['h0']:.2f} m",
         "",
         "Charges sur ce bloc",
         f"  F vertical : {bloc['ext_force']:.0f} N",
         f"  F horizontal : {bloc.get('ext_force_x', 0.0):.0f} N",
         f"  Pression : {bloc['pressure']:.0f} Pa",
-        f"  Moment : {bloc['moment']:.0f} N·m",
     ]
     if stress:
         sig_max_n = stress.get("sigma_max_normal", stress.get("sigma_total", 0.0))
