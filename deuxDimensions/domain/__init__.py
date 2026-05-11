@@ -1,5 +1,6 @@
 """Domaine 2D : constantes et donnees metier partagees."""
 
+from .geometry import sommets_rectangle_ax
 from .constantes import (
     AXIS_XLIM,
     AXIS_YLIM,
@@ -13,6 +14,7 @@ from .constantes import (
 )
 
 __all__ = [
+    "sommets_rectangle_ax",
     "AXIS_XLIM",
     "AXIS_YLIM",
     "FALL_STEP",

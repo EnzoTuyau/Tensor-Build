@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from deuxDimensions.domain.constantes import GRAVITY, GROUND_Y, MATERIAUX, SNAP_TOL
+from deuxDimensions.domain.geometry import sommets_rectangle_ax
 
 
 def _geom_patch(rd: dict[str, Any]) -> tuple[float, float, float, float]:
@@ -133,9 +134,11 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
 
             if min_penet == penet_haut:
                 my = oy + oh
+                my = oy + oh
             elif min_penet == penet_bas:
              my = oy - hauteur
             elif min_penet == penet_droite:
+                mx = ox + ow
                 mx = ox + ow
             else:
                  mx = ox - largeur

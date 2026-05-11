@@ -21,6 +21,7 @@ from deuxDimensions.domain.constantes import (
     SNAP_TOL,
     TIMER_MS,
 )
+from deuxDimensions.domain.geometry import sommets_rectangle_ax
 from deuxDimensions.physics.calculs import _geom_patch, _hauteur_appui_max, _resoudre_collision
 
 
@@ -495,7 +496,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
 
             h0 = bloc["h0"]
-            w = bloc["w"]
+            w = bloc["largeur"]
             x, y = bloc["x"], bloc["y"]
 
             dh = stress.get("delta_h", 0.0)
