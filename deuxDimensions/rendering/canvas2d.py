@@ -229,7 +229,7 @@ class Canvas2D(FigureCanvasQTAgg):
             return
 
         a_bouge = False
-        ordre = sorted(..., key=lambda i: self.blocs[i]["y"])
+        ordre = sorted(range(len(self.blocs)), key=lambda i: self.blocs[i]["y"])
 
         for idx in ordre:
             if idx == self._idx_drag:
@@ -496,7 +496,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
 
             h0 = bloc["h0"]
-            w = bloc["largeur"]
+            w = bloc["w"]
             x, y = bloc["x"], bloc["y"]
 
             dh = stress.get("delta_h", 0.0)
