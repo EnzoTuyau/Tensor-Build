@@ -110,17 +110,20 @@ class MaterielSimulationApp(QMainWindow):
         scene.plotter.interactor.setFocus()  # donne le focus immédiatement
         scene._refresh_action_buttons()
 
-    def closeEvent(self, event):
-        # Fermer explicitement le QtInteractor (render_timer, BasePlotter, QVTK) avant
-        # que Qt ne détruisse l’arbre de widgets : sinon segfault en changeant de mode.
-        if hasattr(self, "plotter") and self.plotter is not None:
+    def closeEvent(scene, event):
+        """Libère VTK / OpenGL avant destruction du widget (évite segfault au switch 2D)."""
+        if hasattr(scene, "plotter") and scene.plotter is not None:
             try:
-                self.plotter.interactor.removeEventFilter(self)
+                scene.plotter.interactor.removeEventFilter(scene)
             except RuntimeError:
                 pass
             try:
-                if not getattr(self.plotter, "_closed", False):
-                    self.plotter.close()
+                scene.plotter.disable_picking()
+            except Exception:
+                pass
+            try:
+                if not getattr(scene.plotter, "_closed", False):
+                    scene.plotter.close()
             except RuntimeError:
                 pass
         super().closeEvent(event)

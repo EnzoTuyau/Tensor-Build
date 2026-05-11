@@ -1,5 +1,10 @@
 """Domaine 2D : constantes et donnees metier partagees."""
 
+from deuxDimensions.domain.geometry import (
+    largeur_bloc,
+    sommets_quad_depuis_xy_patch,
+    sommets_rectangle_ax,
+)
 from .constantes import (
     AXIS_XLIM,
     AXIS_YLIM,
@@ -13,6 +18,9 @@ from .constantes import (
 )
 
 __all__ = [
+    "largeur_bloc",
+    "sommets_quad_depuis_xy_patch",
+    "sommets_rectangle_ax",
     "AXIS_XLIM",
     "AXIS_YLIM",
     "FALL_STEP",

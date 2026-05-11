@@ -25,12 +25,16 @@ if platform.system() == "Darwin":
                 self._deferred_vtk_timer().start(0)
 
         def _deferred_render(self):
-            self._render_deferred = False
-            if not shiboken6.isValid(self):
-                return
             try:
-                self._Iren.Render()
+                if not shiboken6.isValid(self):
+                    return
+                if self.isVisible() and getattr(self, "_Iren", None) is not None:
+                    self._Iren.Render()
             except RuntimeError:
-                return
+                pass
+            except Exception:
+                pass
+            finally:
+                self._render_deferred = False
 else:
     SafeQtInteractor = QtInteractor
