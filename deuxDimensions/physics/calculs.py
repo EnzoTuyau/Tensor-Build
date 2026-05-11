@@ -10,7 +10,7 @@ from deuxDimensions.domain.constantes import GRAVITY, GROUND_Y, MATERIAUX, SNAP_
 def _geom_patch(rd: dict[str, Any]) -> tuple[float, float, float, float]:
     """Coin bas-gauche et dimensions du rectangle matplotlib du bloc."""
      
-    return rd["x"], rd["y"], rd["largeur"], rd["h0"]
+    return rd["x"], rd["y"], rd["w"], rd["h0"]
 
 
 def _charge_verticale_equivalente(rd: dict[str, Any]) -> float:
@@ -108,9 +108,9 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
     """
     Repousse un bloc mobile hors collision par l'axe de moindre penetration.
     """
-    patch_mobile = blocs[idx_mobile]["patch"]
-    mx, my = patch_mobile.get_xy()
-    largeur, hauteur = patch_mobile.get_width(), patch_mobile.get_height()
+    bloc_m = blocs[idx_mobile]
+    mx, my = bloc_m["x"], bloc_m["y"]
+    largeur, hauteur = bloc_m["largeur"], bloc_m["h0"]
     collision = False
 
     for i, autre_bloc in enumerate(blocs):
@@ -118,8 +118,7 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
             continue
 
         patch_autre = autre_bloc["patch"]
-        ox, oy = patch_autre.get_xy()
-        ow, oh = patch_autre.get_width(), patch_autre.get_height()
+        ox, oy, ow, oh = _geom_patch(autre_bloc)
 
         chevauche_x = mx < ox + ow and ox < mx + largeur
         chevauche_y = my < oy + oh and oy < my + hauteur
@@ -133,16 +132,25 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
             min_penet = min(penet_haut, penet_bas, penet_droite, penet_gauche)
 
             if min_penet == penet_haut:
-                patch_mobile.set_xy((mx, oy + oh))
+                my = oy + oh
             elif min_penet == penet_bas:
-                patch_mobile.set_xy((mx, oy - hauteur))
+             my = oy - hauteur
             elif min_penet == penet_droite:
-                patch_mobile.set_xy((ox + ow, my))
+                mx = ox + ow
             else:
-                patch_mobile.set_xy((ox - largeur, my))
+                 mx = ox - largeur
 
-            mx, my = patch_mobile.get_xy()
-            collision = True
+    bloc_m["x"] = mx
+    bloc_m["y"] = my
+    bloc_m["patch"].set_xy([
+        (mx,          my),
+        (mx + largeur, my),
+        (mx + largeur, my + hauteur),
+        (mx,          my + hauteur),
+                            ])
+    collision = True
+    
+             
 
     return collision
 

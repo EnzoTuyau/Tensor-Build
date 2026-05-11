@@ -302,8 +302,10 @@ class PanneauControle(QFrame):
         
         self.liste_blocs.clear()
         for i, bloc in enumerate(self.canvas.blocs):
-            patch = bloc["patch"]
-            libelle = f"[{i+1}] {bloc['material']}  {patch.get_width():.1f}×{patch.get_height():.1f} m"
+        
+            largeur = bloc.get('w', 0.0)
+            hauteur = bloc.get('h0', 0.0)
+            libelle = f"[{i+1}] {bloc['material']}  {largeur:.1f}×{hauteur:.1f} m"
             row = _ligne_liste_bloc(self, i, libelle)
             item = QListWidgetItem()
             item.setSizeHint(row.sizeHint())

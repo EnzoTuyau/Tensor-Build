@@ -228,24 +228,36 @@ class Canvas2D(FigureCanvasQTAgg):
             return
 
         a_bouge = False
-        ordre = sorted(range(len(self.blocs)), key=lambda i: self.blocs[i]["patch"].get_xy()[1])
+        ordre = sorted(..., key=lambda i: self.blocs[i]["y"])
 
         for idx in ordre:
             if idx == self._idx_drag:
                 continue
 
-            patch = self.blocs[idx]["patch"]
-            x, y = patch.get_xy()
+            bloc = self.blocs[idx]
+            x = bloc["x"]
+            y = bloc["y"]
+            w = bloc["w"]   
+            h = bloc["h0"]
             plancher = _hauteur_appui_max(self.blocs, idx)
 
             if y > plancher + 0.001:
-                nouvelle_y = max(plancher, y - FALL_STEP)
-                patch.set_xy((x, nouvelle_y))
+                nouvelle_y = max(plancher, y - 0.1) # Utilise ta constante FALL_STEP ici
+                bloc["y"] = nouvelle_y
+                # On met à jour les 4 points du polygone pour la descente
+                bloc["patch"].set_xy([
+                    [x, nouvelle_y],
+                    [x + w, nouvelle_y],
+                    [x + w, nouvelle_y + h],
+                    [x, nouvelle_y + h]
+                ])
                 a_bouge = True
-
+        
         if a_bouge:
+            self._notifier()
             self.draw_idle()
-            self._notifier(refresh_list=False)
+  
+    
 
     # ── Gestion des blocs ────────────────────────────────────
 
@@ -266,16 +278,16 @@ class Canvas2D(FigureCanvasQTAgg):
         else:
             y_depart = GROUND_Y
             if self.blocs:
-                sommets = [b["patch"].get_xy()[1] + b["patch"].get_height() for b in self.blocs]
+                sommets = [b["y"] + b["h0"] for b in self.blocs]  
                 y_depart = max(sommets)
             x_depart = 0.5
 
-
-            points = [
-                (x_depart, y_depart),   
-                (x_depart + largeur, y_depart),
-                (x_depart + largeur, y_depart + hauteur),
-                (x_depart, y_depart + hauteur),]
+        points = [                  
+            (x_depart,           y_depart),
+            (x_depart + largeur, y_depart),
+            (x_depart + largeur, y_depart + hauteur),
+            (x_depart,           y_depart + hauteur),
+        ]
             
 
         patch = Polygon(
@@ -294,7 +306,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 "patch": patch,
                 "x": x_depart,
                 "y": y_depart,
-                "largeur": largeur,
+                "w": largeur,
                 "h0": hauteur,
                 "material": materiau,
                 "density": densite, 
@@ -337,20 +349,25 @@ class Canvas2D(FigureCanvasQTAgg):
 
     def _tester_clic(self, event):
         """
-        Retourne l'index du bloc clique, en partant du dessus (dernier ajoute).
-        Retourne None si le clic est dans le vide.
+        Détection manuelle robuste : vérifie si le clic est dans les limites du bloc.
         """
-
         if event.xdata is None or event.ydata is None:
             return None
-        
 
-        for i, bloc in enumerate(reversed(self.blocs)):
-            idx = len(self.blocs) - 1 - i
-            patch = bloc["patch"]
+        # On parcourt à l'envers pour attraper le bloc du dessus
+        for i in range(len(self.blocs) - 1, -1, -1):
+            bloc = self.blocs[i]
+            
+            # On récupère les limites actuelles
+            x_min = bloc["x"]
+            x_max = bloc["x"] + bloc["w"]
+            y_min = bloc["y"]
+            y_max = bloc["y"] + bloc["h0"]
 
-            if patch.contains_point((event.xdata, event.ydata)):
-                return idx
+            # Test de collision simple (boîte englobante)
+            if x_min <= event.xdata <= x_max and y_min <= event.ydata <= y_max:
+                return i
+                
         return None
 
     def _souris_appui(self, event):
@@ -374,6 +391,7 @@ class Canvas2D(FigureCanvasQTAgg):
             
 
     def _souris_mouvement(self, event):
+       
         if self._idx_drag is None or event.inaxes != self.axes:
             return
         if event.xdata is None or event.ydata is None:
@@ -382,29 +400,30 @@ class Canvas2D(FigureCanvasQTAgg):
         bloc = self.blocs[self._idx_drag]
         patch = bloc["patch"]
 
-        w = bloc["largeur"]
+        # FIX : On utilise "w" car c'est ce qu'on a mis dans ajouter_bloc
+        w = bloc["w"] 
         h = bloc["h0"]
 
         xmin, xmax = self.axes.get_xlim()
         _, ymax = self.axes.get_ylim()
-        
 
+        # Calcul de la position avec l'offset pour éviter que le bloc "saute"
         x = max(xmin, min(xmax - w, event.xdata - self._offset_drag[0]))
         y = max(GROUND_Y, min(ymax - h, event.ydata - self._offset_drag[1]))
 
+        # On met à jour les coordonnées réelles du bloc
         bloc["x"] = x
         bloc["y"] = y
 
+        # On redessine le polygone à sa nouvelle place (en mode "rectangle" pendant le drag)
         points = [
-            (x, y),
-            (x + w, y),
-            (x + w, y + h),
-            (x, y + h),
+            [x, y],
+            [x + w, y],
+            [x + w, y + h],
+            [x, y + h],
         ]
 
         patch.set_xy(points)
-    
-
 
         _resoudre_collision(self._idx_drag, self.blocs)
         self.draw_idle()
