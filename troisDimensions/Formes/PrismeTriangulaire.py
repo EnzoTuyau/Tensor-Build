@@ -3,7 +3,7 @@ import pyvista as pv
 
 class PrismeTriangulaire(Forme):
     NOM = "Prisme Triangulaire"
-
+    # Constructeur de la classe PrismeTriangulaire, hérite de Forme
     def construire_mesh(self):
         # Cylindre à 3 côtés = prisme triangulaire
         return pv.Cylinder(center=self.c, radius=self.r,

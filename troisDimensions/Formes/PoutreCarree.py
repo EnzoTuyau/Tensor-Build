@@ -4,7 +4,7 @@ from .Forme import Forme
 
 class PoutreCarree(Forme):
     NOM = "Poutre (Carrée)"
-
+    # Constructeur de la classe PoutreCarree, hérite de Forme
     def construire_mesh(self):
         return pv.Cube(center=self.c,
                        x_length=self.l,
