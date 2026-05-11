@@ -1,4 +1,4 @@
-"""Geometrie 2D partagee (rectangles axis-alignes comme polygones)."""
+"""Rectangles 2D alignés axes (polygones partagés)."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ import numpy as np
 
 
 def largeur_bloc(bloc: dict[str, Any]) -> float:
-    """Largeur (m) : clé canonique ``w``, alias historique ``largeur``."""
+    """Largeur (m) : clé ``w``, ou ``largeur`` si présente (ancien format)."""
     if "largeur" in bloc:
         return float(bloc["largeur"])
     return float(bloc.get("w", 0.0))
 
 
 def sommets_rectangle_ax(x: float, y: float, largeur: float, hauteur: float):
-    """Sommets du rectangle [bas-gauche, bas-droit, haut-droit, haut-gauche]."""
+    """Rectangle matplotlib : bas-gauche, bas-droit, haut-droit, haut-gauche."""
     return [
         (x, y),
         (x + largeur, y),
@@ -25,12 +25,7 @@ def sommets_rectangle_ax(x: float, y: float, largeur: float, hauteur: float):
 
 
 def sommets_quad_depuis_xy_patch(xy) -> list[tuple[float, float]]:
-    """
-    Jusqu'à 4 sommets distincts à partir du tableau ``get_xy()`` d'un Polygone matplotlib.
-
-    Si le polygone est fermé, le dernier point duplique souvent le premier : on l'exclut.
-    Avec exactement 4 points sans duplication, les quatre sommets sont conservés (éviter len(xy)-1).
-    """
+    """Jusqu’à 4 sommets depuis ``get_xy()`` ; retire le point fermant dupliqué si besoin."""
     arr = np.asarray(xy, dtype=np.float64)
     n = int(arr.shape[0])
     if n < 1:

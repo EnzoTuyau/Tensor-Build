@@ -1,13 +1,4 @@
-"""
-Façade de compatibilité du mode 2D.
-
-Historique:
-- Le projet exposait toute l'application via ce seul fichier.
-- La logique est maintenant répartie dans `domain/`, `physics/`, `rendering/`, `ui/` et `app/`.
-
-Ce module conserve l'import historique:
-`from deuxDimensions.app.tensor2d import MaterialSimulationApp`
-"""
+"""Réexports historiques du mode 2D (la logique est dans les sous-paquets)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Infobulle de contact deplacable pour la vue 2D."""
+"""Infobulle déplaçable : détail HTML d’un contact entre blocs."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 
 class ContactTooltip(QWidget):
-    """Petite fenetre HTML deplacable pour detailler un contact."""
+    """Petite fenêtre HTML ; glisser depuis la barre du haut."""
 
     def __init__(self, parent=None):
         super().__init__(
@@ -37,7 +37,7 @@ class ContactTooltip(QWidget):
         self._drag_hint.setMinimumHeight(18)
         self._drag_hint.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._drag_hint.setCursor(Qt.CursorShape.SizeAllCursor)
-        self._drag_hint.setToolTip("Glisser pour deplacer (reste dans le plan de dessin)")
+        self._drag_hint.setToolTip("Glisser pour déplacer (reste dans le plan de dessin)")
         head.addWidget(self._drag_hint, stretch=1)
         self._btn_close = QPushButton("×")
         self._btn_close.setFixedSize(22, 22)
@@ -96,11 +96,11 @@ class ContactTooltip(QWidget):
         super().mouseReleaseEvent(event)
 
     def set_plot_bounds_global(self, rect: QRect):
-        """Rectangle global (ecran) dans lequel l'infobulle peut glisser."""
+        """Zone globale (pixel écran) où la fenêtre peut glisser."""
         self._bounds = QRect(rect)
 
     def _clamp_top_left(self, top_left: QPoint) -> QPoint:
-        """Recadre le coin haut-gauche pour rester dans _bounds, avec une marge."""
+        """Garde la fenêtre dans ``_bounds``."""
         x, y = top_left.x(), top_left.y()
         w, h = self.width(), self.height()
         if w < 2 or h < 2:
@@ -124,9 +124,9 @@ class ContactTooltip(QWidget):
         return QPoint(x, y)
 
     def clamp_to_bounds(self):
-        """Apres redimensionnement : garde la fenetre visible dans la zone autorisee."""
+        """Recaler après resize graphe."""
         self.move(self._clamp_top_left(self.pos()))
 
     def set_rich_text(self, html):
-        """Affiche du texte riche (HTML) dans le corps de l'infobulle."""
+        """Corps HTML."""
         self._lbl.setText(html)

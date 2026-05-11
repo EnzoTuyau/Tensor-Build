@@ -1,4 +1,4 @@
-"""Fenetre principale et orchestration du mode 2D."""
+"""Fenêtre 2D : canvas + dock + toasts ; boucle physique → rupture → dessin."""
 
 from __future__ import annotations
 
@@ -20,11 +20,7 @@ from deuxDimensions.ui.toast_notifications import ToastStack
 
 
 class MaterialSimulationApp(QMainWindow):
-    """
-    Fenetre principale de la simulation 2D.
-    Assemble le canvas et le panneau de controle,
-    et orchestre les calculs physiques (physique → ruptures / latch → dessin).
-    """
+    """Simulateur RDM 2D — assemble graphe, panneau et notifications."""
 
     def __init__(self, mode="2D", switch_callback=None):
         super().__init__()
@@ -79,7 +75,7 @@ class MaterialSimulationApp(QMainWindow):
         self._toasts = ToastStack(self, dock_a_eviter=self._dock_controles)
 
     def _signaler_rupture(self, numero: int, materiau: str, util_pct: float):
-        """Callback appelé par le Canvas quand un bloc est officiellement rompu."""
+        """Toast + barre d’état quand le canvas signale une rupture."""
         titre = f"Bloc {numero} brisé"
         sous = (
             f"{materiau} — contrainte au-delà du seuil "
@@ -89,7 +85,7 @@ class MaterialSimulationApp(QMainWindow):
         self.statusBar().showMessage(f"{titre} · {sous}", 6500)
 
     def _on_changed(self, *, refresh_list=True):
-        """Recalcule la physique et redessine ; met a jour la liste si demande."""
+        """Recalcule physique, ruptures, dessin ; option liste panneau."""
         if refresh_list:
             self.panneau.rafraichir_liste()
         donnees_stress, paires = self._calculer_physique()
@@ -98,10 +94,7 @@ class MaterialSimulationApp(QMainWindow):
         self.panneau.rafraichir_infobulle_contact(paires, donnees_stress)
 
     def _calculer_physique(self):
-        """
-        Calcule et met a jour les zones de resultats HTML du panneau.
-        Retourne les donnees de stress et les paires de contact.
-        """
+        """HTML panneau + retour (stress, paires) pour le canvas."""
         resultats = calculer_donnees_physiques(
             self.canvas.blocs, gravite_active=self.canvas.gravite_active
         )
@@ -113,7 +106,7 @@ class MaterialSimulationApp(QMainWindow):
 
 
 def lancer_application():
-    """Point d'entree d'execution locale de la fenetre 2D."""
+    """Lance Qt Fusion + fenêtre principale."""
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     fenetre = MaterialSimulationApp()

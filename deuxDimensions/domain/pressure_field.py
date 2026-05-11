@@ -1,13 +1,4 @@
-"""
-Champ scalaire pour la carte thermique / pression sur un bloc 2D.
-
-Le rendu combine :
-- la contrainte normale axiale ``sigma_axial`` (uniforme sur la hauteur) ;
-- une contribution pédagogique liée à la pression surfacique ``bloc["pressure"]`` :
-  intensité maximale en tête du bloc et décroissance linéaire vers la base.
-
-La valeur affichée est en Pa (contrainte et ordre de grandeur pression).
-"""
+"""Champ Pa pour la carte bloc : sigma_axial, rampe pression, pics gaussiens sur F_z / F_x."""
 
 from __future__ import annotations
 
@@ -26,16 +17,7 @@ def scalar_field_for_heatmap(
     nx: int,
     ny: int,
 ) -> np.ndarray:
-    """
-    Matrice (ny, nx) : |sigma_axial| + charge répartie + concentrations
-    locales des forces F_z / F_x au point d'application (Pa).
-
-    **Modèle pédagogique** : rampe liée à ``pressure`` (max en tête du bloc) et
-    points chauds gaussiens autour de l'application de F_z (haut) et F_x (côté).
-    **Données RDM** : ``stress`` (sigma_axial uniquement).
-
-    Ligne iy=0 correspond au bas du bloc (``origin='lower'`` pour imshow).
-    """
+    """Matrice (ny, nx) en Pa ; ligne 0 = bas du bloc. ``stress`` fournit surtout sigma_axial."""
     w = largeur_bloc(bloc)
     h = max(float(h), 1e-9)
     nx = max(2, nx)
@@ -58,21 +40,20 @@ def scalar_field_for_heatmap(
     col = np.abs(sigma_norm) + surf_term
     field = np.broadcast_to(col.astype(np.float64)[:, np.newaxis], (ny, nx)).copy()
 
-    # Contributions locales en deux dimensions : noyaux gaussiens centrés sur les points
-    # d'application des forces, étalement sur environ un tiers de la plus petite dimension.
+    # Noyaux gaussiens sur les points d’application (~ tiers de la petite dimension).
     if abs(f_ext) > 1e-6 or abs(f_ext_x) > 1e-6:
         ix_norm = (np.arange(nx, dtype=np.float64) + 0.5) / nx
         iy_norm = (np.arange(ny, dtype=np.float64) + 0.5) / ny
-        Xn, Yn = np.meshgrid(ix_norm, iy_norm)  # Tableaux (ny, nx), coordonnées normalisées entre 0 et 1
+        Xn, Yn = np.meshgrid(ix_norm, iy_norm)  # coords normalisées 0–1
         scale = max(min(w, h), 1e-3)
         sigma_kernel = 0.35 * scale
-        # Section droite (profondeur unitaire), comme dans calculs.py
+        # Section 1 m (comme calculs)
         section = max(w, 1e-6)
 
         if abs(f_ext) > 1e-6:
-            # Force F_z sur le bord supérieur du bloc ; abscisse normalisée = x_offset
+            # F_z en tête : x normalisé = x_offset
             dx_m = (Xn - x_offset) * w
-            dy_m = (Yn - 1.0) * h  # Origine en haut du bloc : 0 au sommet, négatif vers le bas
+            dy_m = (Yn - 1.0) * h  # haut → bas
             d_fz = np.hypot(dx_m, dy_m)
             kernel_fz = np.exp(-((d_fz / sigma_kernel) ** 2))
             field += (abs(f_ext) / section) * kernel_fz
@@ -80,7 +61,7 @@ def scalar_field_for_heatmap(
         if abs(f_ext_x) > 1e-6:
             x_cote = 0.0 if side == "left" else 1.0
             dx_m = (Xn - x_cote) * w
-            dy_m = (Yn - y_offset) * h
+            dy_m = (Yn - y_offset) * h  # F_x : hauteur normalisée y_offset
             d_fx = np.hypot(dx_m, dy_m)
             kernel_fx = np.exp(-((d_fx / sigma_kernel) ** 2))
             field += (abs(f_ext_x) / section) * kernel_fx

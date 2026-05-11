@@ -1,4 +1,4 @@
-"""Fonctions de physique et calculs RDM du mode 2D."""
+"""Réexporte ``calculs`` (physique / RDM)."""
 
 from .calculs import (
     _charge_verticale_equivalente,

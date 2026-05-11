@@ -28,21 +28,21 @@ from deuxDimensions.domain.constantes import MATERIAUX
 from deuxDimensions.ui.contact_tooltip import ContactTooltip
 
 
-#1. Palette de couleurs (alignée avec menu.py)
-BG          = "#050607"   # Fond global de l'interface
-CARD        = "#06080c"   # Fond des cartes et panneaux
-CARD_HOVER  = "#0c111a"   # Survol des cartes et contrôles
-BORDER      = "#3b4b62"   # Bordures par défaut
-BORDER_HOV  = "#2ea0ff"   # Bordure au survol ou au focus
-TEXT        = "#eaf2ff"   # Texte principal
-TEXT_BRIGHT = "#f3f7ff"   # Titres et libellés mis en avant
-MUTED       = "#9eb4d9"   # Texte secondaire
-DIM         = "#6c7c95"   # Texte tertiaire et placeholders
-ACCENT      = "#1f94ff"   # Bleu de marque
-ACCENT_HOV  = "#2ea0ff"   # Bleu au survol
-ACCENT_DIM  = "#13314a"   # Fond bleu foncé pour l'état actif
-DANGER      = "#ff6b6b"   # Alertes et erreurs
-SUCCESS     = "#5ee1a1"   # Confirmation et états positifs
+# palette (menu.py)
+BG          = "#050607"   # fond
+CARD        = "#06080c"   # cartes
+CARD_HOVER  = "#0c111a"   # survol
+BORDER      = "#3b4b62"
+BORDER_HOV  = "#2ea0ff"   # focus
+TEXT        = "#eaf2ff"
+TEXT_BRIGHT = "#f3f7ff"
+MUTED       = "#9eb4d9"
+DIM         = "#6c7c95"
+ACCENT      = "#1f94ff"
+ACCENT_HOV  = "#2ea0ff"
+ACCENT_DIM  = "#13314a"
+DANGER      = "#ff6b6b"
+SUCCESS     = "#5ee1a1"
 
 
 PANEL_QSS = f"""
@@ -311,7 +311,7 @@ QTextEdit {{
 """
 
 
-#2. Interrupteur moderne (case à cocher stylée sans carré classique)
+#2. Toggle animé (remplace QCheckBox visuel)
 from PySide6.QtCore import QPropertyAnimation, Property
 from PySide6.QtWidgets import QAbstractButton
 
@@ -456,10 +456,10 @@ class PanneauControle(QFrame):
         self._construire_ui()
         self.canvas.set_callback_placement_charge(self._placement_charge_termine)
 
-    #3. Construction de l'interface
+    # UI
 
     def _construire_ui(self):
-        # Conteneur racine avec défilement vertical
+        # scroll racine
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -676,7 +676,7 @@ class PanneauControle(QFrame):
         return btn
 
     def _toggle_placement(self, mode: str):
-        # Désactive l'autre bouton de placement pour éviter deux modes actifs
+        # un seul mode placement actif
         other = self.btn_placer_fx if mode == "F_z" else self.btn_placer_fz
         if other.isChecked():
             other.setChecked(False)
@@ -735,7 +735,7 @@ class PanneauControle(QFrame):
                 self.canvas.activer_mode_placement(None)
         self.lbl_charges_cible.setVisible(not enabled or self._bloc_selectionne is None)
 
-    #4. Slots et logique métier
+    # slots
 
     def _toggle_gravite(self, active):
         self.canvas.activer_gravite(active)
@@ -760,7 +760,7 @@ class PanneauControle(QFrame):
 
     def _selectionner_bloc(self, ligne):
         self._bloc_selectionne = ligne
-        # Changement de bloc sélectionné : quitte le mode placement par clic
+        # changement bloc → quitte placement
         if self.btn_placer_fz.isChecked() or self.btn_placer_fx.isChecked():
             self.btn_placer_fz.setChecked(False)
             self.btn_placer_fx.setChecked(False)
@@ -836,7 +836,7 @@ class PanneauControle(QFrame):
     def afficher_rapport_detail(self, html):
         self.lbl_rapport.setHtml(html)
 
-    #5. Infobulle de détail sur une surface de contact
+    # infobulle contact
 
     def _infobulle_contact_assuree(self):
         if self._infobulle_contact is None:

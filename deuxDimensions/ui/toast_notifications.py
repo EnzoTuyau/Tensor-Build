@@ -1,4 +1,4 @@
-"""Système de toasts modernes (notifications éphémères empilables)."""
+"""Toasts empilés en haut à droite (titre, sous-titre, barre temps restant)."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from deuxDimensions.domain.constantes import (
 )
 
 
+# Espacements pile toast (px globaux parent)
 _PROG_HEIGHT = 3
 _GAP = 8
 _MARGE_DROITE = 18
@@ -36,7 +37,7 @@ _MARGE_HAUT = 18
 
 
 class _ProgressBar(QWidget):
-    """Mince barre de progression sous le toast (décroît avec le temps restant)."""
+    """Barre fine sous la carte ; ratio = temps restant / durée."""
 
     def __init__(self, couleur: str, parent=None):
         super().__init__(parent)
@@ -62,7 +63,7 @@ class _ProgressBar(QWidget):
 
 
 class Toast(QFrame):
-    """Carte de notification : bandeau gauche coloré, icône, titre, sous-titre, barre."""
+    """Carte auto-fermante ; survol = pause du timer ; fondu entrée/sortie."""
 
     def __init__(
         self,
@@ -222,10 +223,7 @@ class Toast(QFrame):
 
 
 class ToastStack(QObject):
-    """
-    Empile les toasts en haut-droite du parent (overlay, sans layout).
-    Au-delà de TOAST_MAX_VISIBLES, met les suivants en file et affiche '+N'.
-    """
+    """Gère la pile + file d’attente ; évite le dock droit si demandé."""
 
     def __init__(self, parent: QWidget, dock_a_eviter: QWidget | None = None):
         super().__init__(parent)
@@ -318,7 +316,7 @@ class ToastStack(QObject):
 
 
 class _OverflowChip(QFrame):
-    """Petite pastille '+N autres' sous la pile de toasts (fenêtre top-level)."""
+    """Pastille « +N » sous la pile."""
 
     def __init__(self, parent=None):
         super().__init__(None)

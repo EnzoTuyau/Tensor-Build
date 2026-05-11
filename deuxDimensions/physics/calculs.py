@@ -39,11 +39,7 @@ def _charge_verticale_au_bas_de_la_pile(
     paires: list[tuple[int, int, float]],
     memo: dict[int, float],
 ) -> float:
-    """Charge verticale totale au bas du bloc (pile comprise).
-
-    Inclut le poids/charges du bloc et tout ce qui lui est superposé au-dessus,
-    via récurrence sur les paires de contact.
-    """
+    """Charge au bas du bloc + tout ce qui s’empile au-dessus (récursif sur paires)."""
     if idx in memo:
         return memo[idx]
     own = _charge_verticale_equivalente(blocs[idx])
@@ -96,7 +92,7 @@ def _bloc_carte_detail(
             f"</tr>"
         )
 
-    # Bloc HTML : tableau des charges (poids propre, contact, forces externes)
+    # HTML charges
     charges_rows = (
         _ligne("Poids propre",     _fmt_force(poids))
         + _ligne("Contact",        _fmt_force(f_contact), f_contact)
@@ -109,7 +105,7 @@ def _bloc_carte_detail(
           f"</td></tr>"
     )
 
-    # Bloc HTML : contraintes normales et de cisaillement
+    # HTML contraintes
     contraintes_rows = (
         _ligne("σ axiale",   f"{sigma_axial/1e6:.2f} MPa")
         + _ligne("σ max |normal|", f"<b style='color:#f3f7ff'>{sigma_max_normal/1e6:.2f} MPa</b>")
@@ -118,7 +114,7 @@ def _bloc_carte_detail(
                  f"{sigma_y/1e6:.0f} · {tau_lim/1e6:.0f} MPa")
     )
 
-    # Pastilles d'utilisation (couleur selon OK / limite / rupture)
+    # pastilles utilisation
     def _pill(label: str, pct: float) -> str:
         if pct < 80:
             c = "#5ee1a1"
@@ -178,9 +174,8 @@ def _contraintes_et_detail_bloc(
     memo_axiale_totale: dict[int, float],
 ) -> tuple[dict[str, Any], str, list[str]]:
     _, _, w, h = _geom_patch(bloc)
-    aire = w * h  # Aire de la face visible (m²) ; sert au volume pour la masse (volume = aire × 1 m)
-    # Section droite (m²), perpendiculaire à l'effort axial vertical, avec profondeur unitaire (1 m).
-    # C'est cette section qu'il faut utiliser pour σ = F/A, pas l'aire de la face affichée.
+    aire = w * h  # masse : volume ~ aire × 1 m
+    # Section pour σ=F/A (pas l’aire face dessinée)
     section_axiale = w
     mat = MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])
 
@@ -212,7 +207,7 @@ def _contraintes_et_detail_bloc(
     nu = 0.3
     G = E / (2 * (1 + nu))
 
-    # Raccourcissement axial : δ = F·L / (E·A), avec A = section droite.
+    # δ axial ; A = section
     delta_h = (f_axial * h) / (E * section_axiale) if section_axiale > 0 and E > 0 else 0.0
     delta_x = (f_ext_x * h) / (G * section_axiale) if section_axiale > 0 and G > 0 else 0.0
 
@@ -280,10 +275,7 @@ def _contraintes_et_detail_bloc(
 
 
 def _hauteur_affichee_ecrasement(h0: float, stress: dict[str, Any] | None) -> float:
-    """
-    Hauteur (m) du polygone bloc telle que rendu sous charge : meme regle que le canvas
-    (h0 - scale * delta_h), bornee pour eviter la pseudo-disparition du bloc.
-    """
+    """Hauteur rendue avec compression visuelle (même règle que le canvas)."""
     if stress is None:
         return h0
     dh = float(stress.get("delta_h", 0.0))
@@ -355,16 +347,7 @@ def _overlaps_x(bloc_a: dict[str, Any], bloc_b: dict[str, Any]) -> bool:
 def _contact_pairs(
     blocs: list[dict[str, Any]], tol: float = SNAP_TOL
 ) -> list[tuple[int, int, float]]:
-    """
-    Retourne les paires en contact vertical.
-
-    Une paire (i_bas, i_haut, fraction) signifie que i_haut repose sur i_bas.
-    Le contact est validé si la base de i_haut tombe dans la plage logique du sommet
-    de i_bas (du sommet réel ``yi + hi`` jusqu'au sommet écrasé ``yi``), avec une
-    marge ``tol``. Cela rend la détection insensible à la compression visuelle
-    capée du bloc support, et évite que les blocs supérieurs « traversent » un
-    bloc écrasé sans qu'aucune force ne soit transmise.
-    """
+    """Paires (bas, haut, fraction largeur) en contact vertical ; tol = SNAP."""
     paires: list[tuple[int, int, float]] = []
     for i in range(len(blocs)):
         for j in range(len(blocs)):
@@ -384,9 +367,7 @@ def _contact_pairs(
 
 
 def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
-    """
-    Repousse un bloc mobile hors collision par l'axe de moindre penetration.
-    """
+    """Repousse le bloc selon la pénétration minimale."""
     bloc_m = blocs[idx_mobile]
     mx, my = bloc_m["x"], bloc_m["y"]
     largeur, hauteur = largeur_bloc(bloc_m), bloc_m["h0"]
@@ -428,8 +409,6 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
         (mx,          my + hauteur),
                             ])
     collision = True
-    
-             
 
     return collision
 
@@ -437,19 +416,7 @@ def _resoudre_collision(idx_mobile: int, blocs: list[dict[str, Any]]) -> bool:
 def calculer_donnees_physiques(
     blocs: list[dict[str, Any]], gravite_active: bool = True
 ) -> dict[str, Any]:
-    """
-    Calcule les contraintes de tous les blocs et genere les contenus HTML.
-
-    Si gravite_active est False : pas de paires de contact ni de transmission
-    verticale par superposition (chaque bloc ne voit que son propre poids et
-    les charges explicites). La gravité simulée (chute) est pilotée par le canvas.
-
-    Sortie:
-      - donnees_stress: liste des dictionnaires de contraintes
-      - paires: contacts detectes
-      - html_cdgr: contenu HTML "centre de gravite"
-      - html_rapport: contenu HTML detaille
-    """
+    """Stress par bloc + HTML rapport/CDG ; si gravité inactive → pas de paires contact."""
     if not blocs:
         return {
             "donnees_stress": [],

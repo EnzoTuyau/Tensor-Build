@@ -1,4 +1,4 @@
-"""Rendu matplotlib du simulateur 2D."""
+"""Export du canvas 2D matplotlib."""
 
 from .canvas2d import Canvas2D
 

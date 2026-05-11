@@ -1,4 +1,4 @@
-"""Texte d'infobulle pour le survol d'un bloc sur le canvas 2D."""
+"""Texte infobulle au survol d’un bloc sur le graphe."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from deuxDimensions.domain.geometry import largeur_bloc
 
 
 def texte_infobulle_bloc(index: int, bloc: dict[str, Any], stress: dict[str, Any] | None) -> str:
-    """Résumé compact : géométrie, charges appliquées, contraintes si disponibles."""
+    """Résumé géométrie + charges ; détail RDM si ``stress`` est fourni."""
     w = largeur_bloc(bloc)
     lig = [
         f"Bloc {index + 1} — {bloc['material']}",

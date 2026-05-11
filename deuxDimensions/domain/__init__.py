@@ -1,4 +1,4 @@
-"""Domaine 2D : constantes et donnees metier partagees."""
+"""Réexporte géométrie + constantes."""
 
 from deuxDimensions.domain.geometry import (
     largeur_bloc,

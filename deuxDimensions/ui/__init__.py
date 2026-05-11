@@ -1,4 +1,4 @@
-"""Composants Qt du mode 2D."""
+"""ContactTooltip + PanneauControle."""
 
 from .contact_tooltip import ContactTooltip
 from .panneau_controle import PanneauControle
