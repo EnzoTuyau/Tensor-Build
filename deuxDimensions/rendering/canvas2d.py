@@ -16,7 +16,6 @@ from PySide6.QtWidgets import QToolTip
 from deuxDimensions.domain.constantes import (
     AXIS_XLIM,
     AXIS_YLIM,
-    FALL_STEP,
     GRAVITY,
     GROUND_Y,
     HEATMAP_CELLES_MAX,
@@ -59,7 +58,7 @@ from deuxDimensions.ui.charge_tooltip import (
     texte_infobulle_pression,
 )
 
-# Style polygone « bloc sélectionné » (liste ou clic graphe)
+#1. Style du contour lorsque le bloc est sélectionné (liste ou clic sur le graphe)
 _COULEUR_CONTOUR_SELECTION = "#ffb300"
 _EP_POLY_SELECTION = 3.2
 _EP_POLY_NORMAL = 1.8
@@ -291,7 +290,7 @@ class Canvas2D(FigureCanvasQTAgg):
         self._tooltip_ctx = ctx_bloc
         self._idx_tooltip_survol = idx
 
-    # ── Sol ──────────────────────────────────────────────────
+    #2. Dessin du sol
 
     def _dessiner_sol(self):
         """Dessine la bande verte hachuree representant le sol encastre."""
@@ -310,10 +309,10 @@ class Canvas2D(FigureCanvasQTAgg):
             self._ligne_sol.remove()
 
         points_sol = [
-            (x, y),                          # Coin haut gauche (Surface du sol)
-            (x + w, y),                      # Coin haut droite (Surface du sol)
-            (x + w, y - sh),                 # Coin bas droite
-            (x, y - sh)                      # Coin bas gauche
+            (x, y),                          # Sommet haut gauche (niveau du sol)
+            (x + w, y),                      # Sommet haut droit (niveau du sol)
+            (x + w, y - sh),                 # Sommet bas droit
+            (x, y - sh),                     # Sommet bas gauche
         ]
 
 
@@ -481,7 +480,7 @@ class Canvas2D(FigureCanvasQTAgg):
         tip.set_plot_bounds_global(self.rectangle_axes_global())
         tip.clamp_to_bounds()
 
-    # ── Gravite ──────────────────────────────────────────────
+    #3. Gravité et chute libre
 
     def activer_gravite(self, active):
         """Active ou desactive la simulation de chute libre."""
@@ -520,26 +519,26 @@ class Canvas2D(FigureCanvasQTAgg):
             plancher = _hauteur_appui_max(self.blocs, idx, stress_cache)
 
             if y > plancher + 0.001:
-                nouvelle_y = max(plancher, y - 0.1) # Utilise ta constante FALL_STEP ici
+                nouvelle_y = max(plancher, y - 0.1)  # Pas vertical par tick de chute (m) ; voir FALL_STEP pour le pas général
                 bloc["y"] = nouvelle_y
 
                 vx = bloc.get("ext_force_x", 0.0)
-                # On utilise la même logique que dans dessiner_contraintes
-                v_dx = (vx / 1_000_000.0) * 0.5 
-                
-                # On met à jour les 4 points avec v_dx
+                # Même convention de translation horizontale que dans dessiner_contraintes
+                v_dx = (vx / 1_000_000.0) * 0.5
+
+                # Mise à jour des quatre sommets du quadrilatère avec le décalage v_dx
                 bloc["patch"].set_xy([
-                    [x, nouvelle_y],                        # Bas Gauche
-                    [x + w, nouvelle_y],                    # Bas Droite
-                    [x + w + v_dx, nouvelle_y + h],         # Haut Droite (Incliné)
-                    [x + v_dx, nouvelle_y + h]              # Haut Gauche (Incliné)
+                    [x, nouvelle_y],                        # Bas gauche
+                    [x + w, nouvelle_y],                    # Bas droit
+                    [x + w + v_dx, nouvelle_y + h],         # Haut droit (incliné)
+                    [x + v_dx, nouvelle_y + h],             # Haut gauche (incliné)
                 ])
                 a_bouge = True
         
         if a_bouge:
             self._notifier(refresh_list=False)
 
-    # ── Gestion des blocs ────────────────────────────────────
+    #4. Gestion des blocs
 
     def ajouter_bloc(self, largeur, hauteur, materiau="Acier", densite=None):
         """
@@ -619,7 +618,7 @@ class Canvas2D(FigureCanvasQTAgg):
             if notifier:
                 self._notifier()
 
-    # ── Drag & drop ──────────────────────────────────────────
+    #5. Glisser-déposer et sélection au clic
 
     def _tester_clic_contact(self, event):
         """Si le clic tombe dans la bande d'un joint, retourne le dict de hit."""
@@ -645,17 +644,17 @@ class Canvas2D(FigureCanvasQTAgg):
         if event.xdata is None or event.ydata is None:
             return None
 
-        # On parcourt à l'envers pour attraper le bloc du dessus
+        # Parcours du dernier bloc dessiné au premier : le clic touche le bloc du dessus
         for i in range(len(self.blocs) - 1, -1, -1):
             bloc = self.blocs[i]
-            
-            # On récupère les limites actuelles
+
+            # Limites courantes du rectangle du bloc
             x_min = bloc["x"]
             x_max = bloc["x"] + bloc["w"]
             y_min = bloc["y"]
             y_max = bloc["y"] + bloc["h0"]
 
-            # Test de collision simple (boîte englobante)
+            # Test d'inclusion dans la boîte englobante du bloc
             if x_min <= event.xdata <= x_max and y_min <= event.ydata <= y_max:
                 return i
                 
@@ -664,13 +663,13 @@ class Canvas2D(FigureCanvasQTAgg):
     def _souris_appui(self, event):
         if event.inaxes != self.axes or event.button != 1:
             return
-        # Mode placement de charge : prioritaire sur tout le reste.
+        # Mode placement d'une charge : prioritaire sur les autres interactions
         if self._mode_placement_charge is not None and event.xdata is not None:
             idx_p = self._tester_clic(event)
             if idx_p is not None:
                 self._appliquer_placement_charge(idx_p, event.xdata, event.ydata)
                 return
-            # Clic en dehors d'un bloc : sortir du mode sans rien changer.
+            # Clic hors de tout bloc : désactive le mode sans modifier les données
             self.activer_mode_placement(None)
             if callable(self._callback_placement_charge):
                 self._callback_placement_charge(None)
@@ -719,22 +718,22 @@ class Canvas2D(FigureCanvasQTAgg):
         bloc = self.blocs[self._idx_drag]
         patch = bloc["patch"]
 
-        # FIX : On utilise "w" car c'est ce qu'on a mis dans ajouter_bloc
+        # Largeur stockée sous la clé « w », comme dans ajouter_bloc
         w = bloc["w"] 
         h = bloc["h0"]
 
         xmin, xmax = self.axes.get_xlim()
         _, ymax = self.axes.get_ylim()
 
-        # Calcul de la position avec l'offset pour éviter que le bloc "saute"
+        # Position avec offset du clic : évite un saut du bloc au début du déplacement
         x = max(xmin, min(xmax - w, event.xdata - self._offset_drag[0]))
         y = max(GROUND_Y, min(ymax - h, event.ydata - self._offset_drag[1]))
 
-        # On met à jour les coordonnées réelles du bloc
+        # Met à jour les coordonnées réelles du bloc dans le modèle
         bloc["x"] = x
         bloc["y"] = y
 
-        # On redessine le polygone à sa nouvelle place (en mode "rectangle" pendant le drag)
+        # Redessine le patch en rectangle pendant le glissement
         points = [
             [x, y],
             [x + w, y],
@@ -966,14 +965,14 @@ class Canvas2D(FigureCanvasQTAgg):
         except Exception:
             pass
 
-    # ── Rendu visuel des contraintes ─────────────────────────
+    #6. Rendu visuel des contraintes
 
     def dessiner_contraintes(self, donnees_stress, paires_contact):
         """
         Couche contraintes : carte scalaire (σ normale + charge répartie, Pa)
         ou barres RdYlGn selon sigma. Joints cliquables, effort affiche.
         """
-        # Configuration de l'animation (delta_h en m, meme echelle que la gravite / appui)
+        # Animation liée à delta_h (m) : même échelle que la gravité et les appuis
         v_scale = STRESS_DELTA_H_VISUAL_SCALE
         self._verrouiller_vue()
         vider_serie_artists(self._images_chaleur)
@@ -1055,9 +1054,9 @@ class Canvas2D(FigureCanvasQTAgg):
             w = bloc["w"]
             x, y = bloc["x"], bloc["y"]
 
-            # 1. On récupère les données de ton moteur physique
+            # Déformations renvoyées par le moteur physique (delta_h, delta_x)
             dh = stress.get("delta_h", 0.0)
-            dx = stress.get("delta_x", 0.0)  # déplacement horizontal (physique)
+            dx = stress.get("delta_x", 0.0)  # Déplacement horizontal (physique)
 
             v_dh = dh * v_scale
             v_dh = max(

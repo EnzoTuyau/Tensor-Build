@@ -96,7 +96,7 @@ def _bloc_carte_detail(
             f"</tr>"
         )
 
-    # Charges (toujours utiles à voir : poids, contact, externes)
+    # Bloc HTML : tableau des charges (poids propre, contact, forces externes)
     charges_rows = (
         _ligne("Poids propre",     _fmt_force(poids))
         + _ligne("Contact",        _fmt_force(f_contact), f_contact)
@@ -109,7 +109,7 @@ def _bloc_carte_detail(
           f"</td></tr>"
     )
 
-    # Contraintes
+    # Bloc HTML : contraintes normales et de cisaillement
     contraintes_rows = (
         _ligne("σ axiale",   f"{sigma_axial/1e6:.2f} MPa")
         + _ligne("σ max |normal|", f"<b style='color:#f3f7ff'>{sigma_max_normal/1e6:.2f} MPa</b>")
@@ -118,7 +118,7 @@ def _bloc_carte_detail(
                  f"{sigma_y/1e6:.0f} · {tau_lim/1e6:.0f} MPa")
     )
 
-    # Util pills
+    # Pastilles d'utilisation (couleur selon OK / limite / rupture)
     def _pill(label: str, pct: float) -> str:
         if pct < 80:
             c = "#5ee1a1"
@@ -178,10 +178,9 @@ def _contraintes_et_detail_bloc(
     memo_axiale_totale: dict[int, float],
 ) -> tuple[dict[str, Any], str, list[str]]:
     _, _, w, h = _geom_patch(bloc)
-    aire = w * h  # surface de la face (m²) — utilisée pour la masse (volume = aire·1m)
-    # Section transversale (m²) perpendiculaire au flux d'effort axial vertical, en
-    # supposant une profondeur unitaire (1 m). C'est cette section qu'il faut utiliser
-    # pour σ = F/A, pas la surface de la face.
+    aire = w * h  # Aire de la face visible (m²) ; sert au volume pour la masse (volume = aire × 1 m)
+    # Section droite (m²), perpendiculaire à l'effort axial vertical, avec profondeur unitaire (1 m).
+    # C'est cette section qu'il faut utiliser pour σ = F/A, pas l'aire de la face affichée.
     section_axiale = w
     mat = MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])
 
@@ -213,7 +212,7 @@ def _contraintes_et_detail_bloc(
     nu = 0.3
     G = E / (2 * (1 + nu))
 
-    # Raccourcissement axial: δ = F·L / (E·A) avec A = section transversale.
+    # Raccourcissement axial : δ = F·L / (E·A), avec A = section droite.
     delta_h = (f_axial * h) / (E * section_axiale) if section_axiale > 0 and E > 0 else 0.0
     delta_x = (f_ext_x * h) / (G * section_axiale) if section_axiale > 0 and G > 0 else 0.0
 

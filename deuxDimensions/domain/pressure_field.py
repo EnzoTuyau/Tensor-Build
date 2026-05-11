@@ -58,21 +58,21 @@ def scalar_field_for_heatmap(
     col = np.abs(sigma_norm) + surf_term
     field = np.broadcast_to(col.astype(np.float64)[:, np.newaxis], (ny, nx)).copy()
 
-    # Contributions locales 2D : noyaux gaussiens en (x_app, y_app), echelle
-    # diffuse sur ~1/3 de la plus petite dimension.
+    # Contributions locales en deux dimensions : noyaux gaussiens centrés sur les points
+    # d'application des forces, étalement sur environ un tiers de la plus petite dimension.
     if abs(f_ext) > 1e-6 or abs(f_ext_x) > 1e-6:
         ix_norm = (np.arange(nx, dtype=np.float64) + 0.5) / nx
         iy_norm = (np.arange(ny, dtype=np.float64) + 0.5) / ny
-        Xn, Yn = np.meshgrid(ix_norm, iy_norm)  # shape (ny, nx), valeurs 0..1
+        Xn, Yn = np.meshgrid(ix_norm, iy_norm)  # Tableaux (ny, nx), coordonnées normalisées entre 0 et 1
         scale = max(min(w, h), 1e-3)
         sigma_kernel = 0.35 * scale
-        # Section transversale (profondeur unitaire) cohérente avec calculs.py
+        # Section droite (profondeur unitaire), comme dans calculs.py
         section = max(w, 1e-6)
 
         if abs(f_ext) > 1e-6:
-            # F_z appliquée sur le bord supérieur du bloc en x_norm = x_offset
+            # Force F_z sur le bord supérieur du bloc ; abscisse normalisée = x_offset
             dx_m = (Xn - x_offset) * w
-            dy_m = (Yn - 1.0) * h  # 0 au sommet, négatif vers le bas
+            dy_m = (Yn - 1.0) * h  # Origine en haut du bloc : 0 au sommet, négatif vers le bas
             d_fz = np.hypot(dx_m, dy_m)
             kernel_fz = np.exp(-((d_fz / sigma_kernel) ** 2))
             field += (abs(f_ext) / section) * kernel_fz
