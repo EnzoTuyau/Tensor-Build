@@ -298,15 +298,28 @@ class Canvas2D(FigureCanvasQTAgg):
         """Dessine la bande verte hachuree representant le sol encastre."""
         xmin, xmax = AXIS_XLIM
 
+        x = xmin
+        y = GROUND_Y
+        w = xmax - xmin
+        v_dx_final = 0
+        sh = 0.5
+        h = AXIS_YLIM[1] - AXIS_YLIM[0]
+
         if self._patch_sol:
             self._patch_sol.remove()
         if self._ligne_sol:
             self._ligne_sol.remove()
 
-        self._patch_sol = Rectangle(
-            (xmin, GROUND_Y - 0.5),
-            xmax - xmin,
-            0.5,
+        points_sol = [
+            (x, y),                          # Coin haut gauche (Surface du sol)
+            (x + w, y),                      # Coin haut droite (Surface du sol)
+            (x + w, y - sh),                 # Coin bas droite
+            (x, y - sh)                      # Coin bas gauche
+        ]
+
+
+        self._patch_sol = Polygon(
+            points_sol,
             facecolor="#e8f5e9",
             edgecolor="#388e3c",
             linewidth=2,
@@ -501,17 +514,29 @@ class Canvas2D(FigureCanvasQTAgg):
             bloc = self.blocs[idx]
             if bloc.get(etat_bloc.CLE_RUPTURE_EN_COURS):
                 continue
-            patch = bloc["patch"]
             x = bloc["x"]
             y = bloc["y"]
+            w = bloc["w"]
+            h = bloc["h0"]
             plancher = _hauteur_appui_max(self.blocs, idx, stress_cache)
 
             if y > plancher + 0.001:
-                nouvelle_y = max(plancher, y - FALL_STEP)
+                nouvelle_y = max(plancher, y - 0.1) # Utilise ta constante FALL_STEP ici
                 bloc["y"] = nouvelle_y
-                patch.set_xy(sommets_rectangle_ax(x, nouvelle_y, bloc["largeur"], bloc["h0"]))
-                a_bouge = True
 
+                vx = bloc.get("ext_force_x", 0.0)
+                # On utilise la même logique que dans dessiner_contraintes
+                v_dx = (vx / 1_000_000.0) * 0.5 
+                
+                # On met à jour les 4 points avec v_dx
+                bloc["patch"].set_xy([
+                    [x, nouvelle_y],                        # Bas Gauche
+                    [x + w, nouvelle_y],                    # Bas Droite
+                    [x + w + v_dx, nouvelle_y + h],         # Haut Droite (Incliné)
+                    [x + v_dx, nouvelle_y + h]              # Haut Gauche (Incliné)
+                ])
+                a_bouge = True
+        
         if a_bouge:
             self._notifier(refresh_list=False)
 
@@ -534,10 +559,17 @@ class Canvas2D(FigureCanvasQTAgg):
         else:
             y_depart = GROUND_Y
             if self.blocs:
-                y_depart = max(b["y"] + b["h0"] for b in self.blocs)
+                sommets = [b["y"] + b["h0"] for b in self.blocs]  
+                y_depart = max(sommets)
             x_depart = 0.5
 
-        points = sommets_rectangle_ax(x_depart, y_depart, largeur, hauteur)
+        points = [                  
+            (x_depart,           y_depart),
+            (x_depart + largeur, y_depart),
+            (x_depart + largeur, y_depart + hauteur),
+            (x_depart,           y_depart + hauteur),
+        ]
+            
 
         patch = Polygon(
             points,
@@ -555,7 +587,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 "patch": patch,
                 "x": x_depart,
                 "y": y_depart,
-                "largeur": largeur,
+                "w": largeur,
                 "h0": hauteur,
                 "material": materiau,
                 "density": densite,
@@ -610,22 +642,25 @@ class Canvas2D(FigureCanvasQTAgg):
 
     def _tester_clic(self, event):
         """
-        Retourne l'index du bloc clique, en partant du dessus (dernier ajoute).
-        Retourne None si le clic est dans le vide.
+        Détection manuelle robuste : vérifie si le clic est dans les limites du bloc.
         """
-
         if event.xdata is None or event.ydata is None:
             return None
-        
 
-        for i, bloc in enumerate(reversed(self.blocs)):
-            idx = len(self.blocs) - 1 - i
-            patch = bloc["patch"]
-            # contains_point(xdata,ydata) est faux ici : il faut les coords display,
-            # ou patch.contains(event) qui applique le bon transform.
-            dedans, _ = patch.contains(event)
-            if dedans:
-                return idx
+        # On parcourt à l'envers pour attraper le bloc du dessus
+        for i in range(len(self.blocs) - 1, -1, -1):
+            bloc = self.blocs[i]
+            
+            # On récupère les limites actuelles
+            x_min = bloc["x"]
+            x_max = bloc["x"] + bloc["w"]
+            y_min = bloc["y"]
+            y_max = bloc["y"] + bloc["h0"]
+
+            # Test de collision simple (boîte englobante)
+            if x_min <= event.xdata <= x_max and y_min <= event.ydata <= y_max:
+                return i
+                
         return None
 
     def _souris_appui(self, event):
@@ -686,22 +721,30 @@ class Canvas2D(FigureCanvasQTAgg):
         bloc = self.blocs[self._idx_drag]
         patch = bloc["patch"]
 
-        w = bloc["largeur"]
+        # FIX : On utilise "w" car c'est ce qu'on a mis dans ajouter_bloc
+        w = bloc["w"] 
         h = bloc["h0"]
 
         xmin, xmax = self.axes.get_xlim()
         _, ymax = self.axes.get_ylim()
-        
 
+        # Calcul de la position avec l'offset pour éviter que le bloc "saute"
         x = max(xmin, min(xmax - w, event.xdata - self._offset_drag[0]))
         y = max(GROUND_Y, min(ymax - h, event.ydata - self._offset_drag[1]))
 
+        # On met à jour les coordonnées réelles du bloc
         bloc["x"] = x
         bloc["y"] = y
 
-        patch.set_xy(sommets_rectangle_ax(x, y, w, h))
-    
+        # On redessine le polygone à sa nouvelle place (en mode "rectangle" pendant le drag)
+        points = [
+            [x, y],
+            [x + w, y],
+            [x + w, y + h],
+            [x, y + h],
+        ]
 
+        patch.set_xy(points)
 
         _resoudre_collision(self._idx_drag, self.blocs)
         self.draw_idle()
@@ -1011,11 +1054,12 @@ class Canvas2D(FigureCanvasQTAgg):
                 continue
 
             h0 = bloc["h0"]
-            w = bloc["largeur"]
+            w = bloc["w"]
             x, y = bloc["x"], bloc["y"]
 
+            # 1. On récupère les données de ton moteur physique
             dh = stress.get("delta_h", 0.0)
-            dx = stress.get("delta_x", 0.0)
+            dx = stress.get("delta_x", 0.0)  # déplacement horizontal (physique)
 
             v_dh = dh * v_scale
             v_dh = max(
@@ -1024,14 +1068,16 @@ class Canvas2D(FigureCanvasQTAgg):
             )
             v_dx = dx * v_scale
             v_dx = max(-w * 0.15, min(v_dx, w * 0.15))
+            vx = float(bloc.get("ext_force_x", 0.0))
+            v_dx_final = v_dx + (vx / 1_000_000.0) * 0.5
 
             h_animee = h0 - v_dh
 
             nouveaux_points = [
                 (x, y),
                 (x + w, y),
-                (x + w + v_dx, y + h_animee),
-                (x + v_dx, y + h_animee),
+                (x + w + v_dx_final, y + h_animee),
+                (x + v_dx_final, y + h_animee),
             ]
             breaking = bool(bloc.get(etat_bloc.CLE_RUPTURE_EN_COURS))
             if not breaking:

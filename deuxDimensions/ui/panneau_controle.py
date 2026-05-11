@@ -814,9 +814,10 @@ class PanneauControle(QFrame):
         self.liste_blocs.blockSignals(True)
         self.liste_blocs.clear()
         for i, bloc in enumerate(self.canvas.blocs):
+            lw = float(bloc.get("largeur", bloc.get("w", 0.0)))
             libelle = (
                 f"<b>Bloc {i + 1}</b>  ·  {bloc['material']}  ·  "
-                f"{bloc['largeur']:.1f} × {bloc['h0']:.1f} m"
+                f"{lw:.1f} × {bloc['h0']:.1f} m"
             )
             row = _ligne_liste_bloc(self, i, libelle)
             item = QListWidgetItem()
