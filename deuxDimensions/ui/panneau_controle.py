@@ -201,7 +201,14 @@ class PanneauControle(QFrame):
         self.spin_pression.valueChanged.connect(self._appliquer_charges)
         self.spin_moment.valueChanged.connect(self._appliquer_charges)
 
+        self.spin_force_x = QDoubleSpinBox()
+        self.spin_force_x.setRange(-1e7, 1e7)  # Négatif pour pousser à gauche, positif à droite
+        self.spin_force_x.setSuffix(" N")
+        self.spin_force_x.setSingleStep(10000)
+        self.spin_force_x.valueChanged.connect(self._appliquer_charges)
+
         form_charges.addRow("Force ponctuelle:", self.spin_force)
+        form_charges.addRow("Force transversale:", self.spin_force_x)
         form_charges.addRow("Pression dist.:", self.spin_pression)
         form_charges.addRow("Moment fléch.:", self.spin_moment)
         grp_charges.setLayout(form_charges)
@@ -284,13 +291,22 @@ class PanneauControle(QFrame):
             self.spin_moment.setValue(bloc["moment"])
 
     def _appliquer_charges(self):
-        ligne = self._bloc_selectionne
-        if ligne is not None and 0 <= ligne < len(self.canvas.blocs):
-            bloc = self.canvas.blocs[ligne]
-            bloc["ext_force"] = self.spin_force.value()
-            bloc["pressure"] = self.spin_pression.value()
-            bloc["moment"] = self.spin_moment.value()
-            self.callback_physique(refresh_list=False)
+        # On récupère l'index du bloc sélectionné dans ta liste UI
+        idx = self.liste_blocs.currentRow() 
+        if idx < 0:
+            return
+
+        bloc = self.canvas.blocs[idx]
+        
+        # Mise à jour des valeurs dans le dictionnaire du bloc
+        bloc["ext_force"] = self.spin_force.value()     # Vertical (Vy)
+        bloc["ext_force_x"] = self.spin_force_x.value() # Horizontal (Vx) - NOUVEAU
+        bloc["pressure"] = self.spin_pression.value()
+        bloc["moment"] = self.spin_moment.value()
+
+        # On déclenche le rafraîchissement global
+        if self.callback_physique:
+            self.callback_physique()
 
 
     def rafraichir_liste(self):

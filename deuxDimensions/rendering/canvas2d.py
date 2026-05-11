@@ -117,15 +117,28 @@ class Canvas2D(FigureCanvasQTAgg):
         """Dessine la bande verte hachuree representant le sol encastre."""
         xmin, xmax = self.axes.get_xlim()
 
+        x = xmin
+        y = GROUND_Y
+        w = xmax - xmin
+        v_dx_final = 0
+        sh = 0.5
+        h = AXIS_YLIM[1] - AXIS_YLIM[0]
+
         if self._patch_sol:
             self._patch_sol.remove()
         if self._ligne_sol:
             self._ligne_sol.remove()
 
-        self._patch_sol = Rectangle(
-            (xmin, GROUND_Y - 0.5),
-            xmax - xmin,
-            0.5,
+        points_sol = [
+            (x, y),                          # Coin haut gauche (Surface du sol)
+            (x + w, y),                      # Coin haut droite (Surface du sol)
+            (x + w, y - sh),                 # Coin bas droite
+            (x, y - sh)                      # Coin bas gauche
+        ]
+
+
+        self._patch_sol = Polygon(
+            points_sol,
             facecolor="#e8f5e9",
             edgecolor="#388e3c",
             linewidth=2,
@@ -245,12 +258,17 @@ class Canvas2D(FigureCanvasQTAgg):
             if y > plancher + 0.001:
                 nouvelle_y = max(plancher, y - 0.1) # Utilise ta constante FALL_STEP ici
                 bloc["y"] = nouvelle_y
-                # On met à jour les 4 points du polygone pour la descente
+
+                vx = bloc.get("ext_force_x", 0.0)
+                # On utilise la même logique que dans dessiner_contraintes
+                v_dx = (vx / 1_000_000.0) * 0.5 
+                
+                # On met à jour les 4 points avec v_dx
                 bloc["patch"].set_xy([
-                    [x, nouvelle_y],
-                    [x + w, nouvelle_y],
-                    [x + w, nouvelle_y + h],
-                    [x, nouvelle_y + h]
+                    [x, nouvelle_y],                        # Bas Gauche
+                    [x + w, nouvelle_y],                    # Bas Droite
+                    [x + w + v_dx, nouvelle_y + h],         # Haut Droite (Incliné)
+                    [x + v_dx, nouvelle_y + h]              # Haut Gauche (Incliné)
                 ])
                 a_bouge = True
         
@@ -499,23 +517,59 @@ class Canvas2D(FigureCanvasQTAgg):
             w = bloc["w"]
             x, y = bloc["x"], bloc["y"]
 
+            # 1. On récupère les données de ton moteur physique
             dh = stress.get("delta_h", 0.0)
-            dx = stress.get("delta_x", 0.0)
+            dx = stress.get("delta_x", 0.0) # Déplacement horizontal réel calculé
 
+            # 2. On applique l'échelle visuelle
             v_dh = dh * VISUAL_SCALE
-            v_dx = dx * VISUAL_SCALE
+            
+            # --- TEST DU CISAILLEMENT ---
+            # On combine le calcul physique (dx) ET ta force manuelle (vx)
+            # pour être sûr que ça bouge pendant tes tests
+            vx = bloc.get("ext_force_x", 0.0)
+            v_dx_test = (vx / 1_000_000.0) * 0.5 
+            
+            # La déformation finale est la somme du physique et du manuel
+            v_dx_final = (dx * VISUAL_SCALE) + v_dx_test
+            # ----------------------------
 
             h_animee = max(0.01, h0 - v_dh)
 
+            # 3. On applique les points avec v_dx_final
             nouveaux_points = [
                 (x, y),
                 (x + w, y),
-                (x + w + v_dx, y + h_animee),
-                (x + v_dx, y + h_animee),
+                (x + w + v_dx_final, y + h_animee),
+                (x + v_dx_final, y + h_animee),
             ]
+            
             bloc["patch"].set_xy(nouveaux_points)
+            h = h_animee # Utile si tu dessines des choses par-dessus après
 
-            h = h_animee
+            # --- DESSIN DE LA FLÈCHE DE FORCE TRANSVERSALE ---
+            if abs(vx) > 0:
+                # On définit le point d'ancrage (milieu de la face latérale)
+                # Si Vx > 0, la force vient de la gauche et pousse vers la droite
+                anchor_x = x + v_dx_final if vx > 0 else x + w + v_dx_final
+                anchor_y = y + h_animee / 2
+                
+                # Direction de la flèche (longueur visuelle de 1.0 unité)
+                dx_fleche = 1.0 if vx > 0 else -1.0
+                
+                fleche = self.axes.annotate(
+                    "",
+                    xy=(anchor_x, anchor_y),              # Pointe
+                    xytext=(anchor_x - dx_fleche, anchor_y), # Queue
+                    arrowprops=dict(
+                        arrowstyle="->", 
+                        color="red", 
+                        lw=2.5,
+                        mutation_scale=15 # Taille de la pointe
+                    )
+                )
+                self._artistes_fleches.append(fleche)
+
 
             if self.carte_chaleur and norme_pression is not None:
                 p_pa = float(bloc["pressure"])
@@ -542,43 +596,21 @@ class Canvas2D(FigureCanvasQTAgg):
                     (h / 2, stress["sigma_bending_top"]),
                 ]:
                     couleur = colormap(normaliseur(abs(sigma)))
-                    rect = Rectangle(
-                        (x, y + decalage),
-                        w,
-                        h / 2,
-                        facecolor=couleur,
-                        edgecolor="none",
-                        alpha=0.55,
-                        zorder=6,
-                    )
+                    rect = Polygon(nouveaux_points, facecolor=couleur, edgecolor="none", alpha=0.55, zorder=6)
                     self.axes.add_patch(rect)
                     self._patches_stress.append(rect)
             else:
                 couleur = colormap(normaliseur(abs(stress["sigma_total"])))
-                rect = Rectangle(
-                    (x, y),
-                    w,
-                    h,
-                    facecolor=couleur,
-                    edgecolor="none",
-                    alpha=0.55,
-                    zorder=6,
-                )
+                rect = Polygon(nouveaux_points, facecolor=couleur, edgecolor="none", alpha=0.55, zorder=6)
+                
                 self.axes.add_patch(rect)
                 self._patches_stress.append(rect)
 
             ec = bloc.get("edgecolor") or MATERIAUX.get(bloc["material"], MATERIAUX["Acier"])[
                 "edge"
             ]
-            contour = Rectangle(
-                (x, y),
-                w,
-                h,
-                facecolor="none",
-                edgecolor=ec,
-                linewidth=1.5,
-                zorder=7,
-            )
+            contour = Polygon(nouveaux_points, facecolor="none", edgecolor=ec, linewidth=1.5, zorder=7)
+    
             self.axes.add_patch(contour)
             self._patches_stress.append(contour)
 
@@ -600,7 +632,7 @@ class Canvas2D(FigureCanvasQTAgg):
                 util = stress["utilization"]
                 symbole = "✓" if util < 80 else ("!" if util < 100 else "✗")
                 label = self.axes.text(
-                    x + w / 2,
+                    x + w / 2 + (v_dx_final / 2),
                     y + h / 2,
                     f"σ = {stress['sigma_total']/1e6:.2f} MPa\n{util:.0f}% {symbole}",
                     ha="center",
