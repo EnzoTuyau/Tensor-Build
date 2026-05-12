@@ -30,7 +30,7 @@ if platform.system() == "Darwin":
 
                 t = QTimer(self)
 
-                # Le timer ne s’exécute qu’une seule fois
+                # Le timer ne s'exécute qu'une seule fois
                 t.setSingleShot(True)
 
                 # Appelle la méthode de rendu différé à la fin du timer
@@ -41,13 +41,13 @@ if platform.system() == "Darwin":
 
             return t
 
-        #4. Gestion de l’événement de dessin
+        #4. Gestion de l'événement de dessin
         def paintEvent(self, ev):
 
-            # Vérifie qu’un rendu n’est pas déjà prévu
+            # Vérifie qu'un rendu n'est pas déjà prévu
             if not self._render_deferred:
 
-                # Active l’état de rendu différé
+                # Active l'état de rendu différé
                 self._render_deferred = True
 
                 # Lance le timer immédiatement
@@ -55,22 +55,17 @@ if platform.system() == "Darwin":
 
         #5. Exécution du rendu différé
         def _deferred_render(self):
-
-            # Réinitialise l’état du rendu
-            self._render_deferred = False
-
-            # Vérifie que l’objet Qt existe encore
-            if not shiboken6.isValid(self):
-                return
-
             try:
-
-                # Effectue le rendu VTK
-                self._Iren.Render()
-
-            # Ignore les erreurs si le widget est détruit
+                if not shiboken6.isValid(self):
+                    return
+                if self.isVisible() and getattr(self, "_Iren", None) is not None:
+                    self._Iren.Render()
             except RuntimeError:
-                return
+                pass
+            except Exception:
+                pass
+            finally:
+                self._render_deferred = False
 
 
 #6. Sur les autres systèmes, utilise QtInteractor normal

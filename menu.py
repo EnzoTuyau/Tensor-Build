@@ -201,9 +201,9 @@ class GestionnaireApplication:
         old = self.current_window
         self.current_window = App2D(mode="2D", switch_callback=self.open_3d)
         self.current_window.show()
-        if old:
-            # Cacher l’ancienne (VTK ou matplotlib) + traiter la file d’événements
-            # avant de détruire : sinon conflit de contexte GL (segfault fréquent sur macOS).
+        self.current_window.raise_()
+        self.current_window.activateWindow()
+        if old is not None:
             old.hide()
             QApplication.processEvents()
             QTimer.singleShot(0, old.close)
@@ -212,7 +212,9 @@ class GestionnaireApplication:
         old = self.current_window
         self.current_window = App3D(switch_callback=self.open_2d)
         self.current_window.show()
-        if old:
+        self.current_window.raise_()
+        self.current_window.activateWindow()
+        if old is not None:
             old.hide()
             QApplication.processEvents()
             QTimer.singleShot(0, old.close)

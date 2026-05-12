@@ -1,13 +1,4 @@
-"""
-Façade de compatibilité du mode 2D.
-
-Historique:
-- Le projet exposait toute l'application via ce seul fichier.
-- La logique est maintenant répartie dans `domain/`, `physics/`, `rendering/`, `ui/` et `app/`.
-
-Ce module conserve l'import historique:
-`from deuxDimensions.app.tensor2d import MaterialSimulationApp`
-"""
+"""Réexports historiques du mode 2D (la logique est dans les sous-paquets)."""
 
 from __future__ import annotations
 
@@ -30,7 +21,6 @@ from deuxDimensions.physics.calculs import (
     _hauteur_appui_max,
     _resoudre_collision,
     _statistiques_globales_section,
-    _statut_utilisation,
     calculer_donnees_physiques,
 )
 from deuxDimensions.rendering.canvas2d import Canvas2D
@@ -57,7 +47,6 @@ __all__ = [
     "_hauteur_appui_max",
     "_resoudre_collision",
     "_statistiques_globales_section",
-    "_statut_utilisation",
     "calculer_donnees_physiques",
     "lancer_application",
 ]
