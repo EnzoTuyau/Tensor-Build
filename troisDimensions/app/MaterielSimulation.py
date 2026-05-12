@@ -193,16 +193,12 @@ class MaterielSimulationApp(QMainWindow):
         # que Qt ne détruisse l'arbre de widgets : sinon segfault en changeant de mode.
         if hasattr(self, "plotter") and self.plotter is not None:
             try:
-                scene.plotter.interactor.removeEventFilter(scene)
+                self.plotter.interactor.removeEventFilter(self)
             except RuntimeError:
                 pass
             try:
-                scene.plotter.disable_picking()
-            except Exception:
-                pass
-            try:
-                if not getattr(scene.plotter, "_closed", False):
-                    scene.plotter.close()
+                if not getattr(self.plotter, "_closed", False):
+                    self.plotter.close()
             except RuntimeError:
                 pass
         super().closeEvent(event)
